@@ -13,6 +13,9 @@ import type {
   JotmoCreateTextResult,
   JotmoEnvironment,
   JotmoImageMediaType,
+  JotmoIdAvailabilityReason,
+  JotmoIdAvailabilitySnapshot,
+  JotmoIdMutationResult,
   JotmoPendingWrite,
   JotmoRecordCursor,
   JotmoRelatedRecordingEligibility,
@@ -191,6 +194,10 @@ export const MAX_JOTMO_RELATED_RECORDING_PAGE_SIZE = 20
 export const MAX_JOTMO_RELATED_RECORDING_CURSOR_LENGTH = 1024
 const MAX_JOTMO_TIMEZONE_OFFSET_MILLIS = 14 * 60 * 60 * 1000
 const RELATED_RECORDINGS_FUNC_TYPE = 17
+const JOTMO_ID_MIN_LENGTH_DEFAULT = 6
+const JOTMO_ID_MIN_LENGTH_STAFF = 5
+const JOTMO_ID_MAX_LENGTH = 20
+const JOTMO_STAFF_ACCOUNT_TYPE = 2
 
 export interface JotmoImageBytes {
   mediaType: JotmoImageMediaType
@@ -262,6 +269,57 @@ const WECHAT_FILTER_TYPES: Readonly<Record<Exclude<JotmoWechatMessageFilter, 'al
   reply: 25,
   chat_record: 49,
   location_share: 81,
+}
+
+function optionalBooleanValue(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function jotmoIdAvailabilityReason(value: unknown): JotmoIdAvailabilityReason {
+  switch (stringValue(value).trim()) {
+    case 'invalid': return 'invalid'
+    case 'taken': return 'taken'
+    case 'modify_limited': return 'modify_limited'
+    default: return 'server_busy'
+  }
+}
+
+function normalizedJotmoId(value: string, accountType: number): string {
+  const normalized = value.trim()
+  const minLength = accountType === JOTMO_STAFF_ACCOUNT_TYPE
+    ? JOTMO_ID_MIN_LENGTH_STAFF
+    : JOTMO_ID_MIN_LENGTH_DEFAULT
+  if (normalized === '') {
+    throw new JotmoPluginError('jotmo-id-empty', '请输入要设置的即我号', false)
+  }
+  if (!/^[A-Za-z]/.test(normalized)) {
+    throw new JotmoPluginError('jotmo-id-leading-character-invalid', '即我号必须以英文字母开头', false)
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(normalized)) {
+    throw new JotmoPluginError('jotmo-id-characters-invalid', '即我号仅支持字母、数字、下划线或减号', false)
+  }
+  const length = [...normalized].length
+  if (length < minLength || length > JOTMO_ID_MAX_LENGTH) {
+    throw new JotmoPluginError(
+      'jotmo-id-length-invalid',
+      `即我号需要 ${String(minLength)}-${String(JOTMO_ID_MAX_LENGTH)} 个字符`,
+      false,
+    )
+  }
+  return normalized
+}
+
+function unavailableJotmoIdError(availability: JotmoIdAvailabilitySnapshot): JotmoPluginError {
+  switch (availability.reason) {
+    case 'taken':
+      return new JotmoPluginError('jotmo-id-taken', '这个即我号已被占用，请换一个再试', false, 409)
+    case 'modify_limited':
+      return new JotmoPluginError('jotmo-id-modify-limited', '每个账号通常仅能修改一次即我号，你当前已无法再次修改', false, 409)
+    case 'invalid':
+      return new JotmoPluginError('jotmo-id-invalid', '这个即我号不符合设置规则，请检查后重试', false)
+    default:
+      return new JotmoPluginError('jotmo-id-availability-unavailable', '暂时无法确认这个即我号是否可用，请稍后重试', true, 503)
+  }
 }
 
 function maskedPhone(value: string): string | undefined {
@@ -690,13 +748,16 @@ export class JotmoService {
     const avatarRef = stringValue(data.head_img).trim()
     const phone = maskedPhone(stringValue(data.phone))
     const email = maskedEmail(stringValue(data.email))
+    const jotmoId = stringValue(data.jotmo_id).trim() || stringValue(data.name_slug).trim()
+    const canUpdateJotmoId = optionalBooleanValue(data.can_update_jotmo_id)
     const profile: JotmoUserProfile = {
       userId,
       displayName,
       nickname,
       avatarRef,
       ...(/^https?:\/\//i.test(avatarRef) ? { avatarUrl: avatarRef } : {}),
-      jotmoId: stringValue(data.name_slug).trim(),
+      jotmoId,
+      ...(canUpdateJotmoId === undefined ? {} : { canUpdateJotmoId }),
       accountType: numberValue(data.type),
       createdAt: numberValue(data.create_at),
       bindings: {
@@ -710,6 +771,93 @@ export class JotmoService {
       },
     }
     return await this.stateStore.cacheProfile(userId, profile)
+  }
+
+  async checkJotmoIdAvailability(name: string): Promise<JotmoIdAvailabilitySnapshot> {
+    const snapshot = await this.refreshProfile()
+    if (snapshot.profile === null) {
+      throw new JotmoPluginError('profile-contract-invalid', '即我个人资料当前不可用', true, 502)
+    }
+    const target = normalizedJotmoId(name, snapshot.profile.accountType)
+    return await this.remoteJotmoIdAvailability(target)
+  }
+
+  async setJotmoIdOnce(name: string): Promise<JotmoIdMutationResult> {
+    const session = await this.requireSession()
+    const before = await this.refreshProfile()
+    const profile = before.profile
+    if (profile === null) {
+      throw new JotmoPluginError('profile-contract-invalid', '即我个人资料当前不可用', true, 502)
+    }
+    const target = normalizedJotmoId(name, profile.accountType)
+    if (profile.jotmoId === target) {
+      return {
+        jotmoId: target,
+        changed: false,
+        canUpdate: profile.canUpdateJotmoId ?? false,
+        revision: before.revision,
+      }
+    }
+    if (profile.canUpdateJotmoId === false) {
+      throw unavailableJotmoIdError({
+        available: false,
+        reason: 'modify_limited',
+        jotmoId: target,
+      })
+    }
+
+    const availability = await this.remoteJotmoIdAvailability(target)
+    if (!availability.available) throw unavailableJotmoIdError(availability)
+
+    try {
+      const data = await this.authenticatedAuthPost<Record<string, unknown>>(
+        '/api/v1/auth/update-jotmo-id',
+        { name: target },
+      )
+      const returnedName = stringValue(data.name).trim() || target
+      if (returnedName !== target) {
+        throw new JotmoPluginError('jotmo-id-update-contract-invalid', '即我号设置结果与请求不一致，请刷新后确认', true, 502)
+      }
+    } catch (error) {
+      const reconciled = await this.tryRefreshProfile()
+      if (reconciled?.profile?.jotmoId === target) {
+        return this.jotmoIdMutationResult(reconciled, profile.jotmoId)
+      }
+      if (error instanceof JotmoPluginError && error.code === 'jotmo-code-1001') {
+        try {
+          const latestAvailability = await this.remoteJotmoIdAvailability(target)
+          if (!latestAvailability.available) throw unavailableJotmoIdError(latestAvailability)
+        } catch (availabilityError) {
+          if (availabilityError instanceof JotmoPluginError
+            && ['jotmo-id-taken', 'jotmo-id-modify-limited', 'jotmo-id-invalid'].includes(availabilityError.code)) {
+            throw availabilityError
+          }
+        }
+        throw new JotmoPluginError(
+          'jotmo-id-update-rejected',
+          '即我号设置未完成，请刷新资料确认修改资格，或换一个即我号后重试',
+          false,
+          409,
+          { cause: error },
+        )
+      }
+      throw error
+    }
+
+    let after: JotmoUserProfileSnapshot
+    try {
+      after = await this.refreshProfile()
+    } catch {
+      after = await this.stateStore.cacheProfile(session.userId, {
+        ...profile,
+        jotmoId: target,
+        canUpdateJotmoId: false,
+      })
+    }
+    if (after.profile?.jotmoId !== target) {
+      throw new JotmoPluginError('jotmo-id-update-contract-invalid', '即我号设置已受理，但刷新结果不一致，请重新查询确认', true, 502)
+    }
+    return this.jotmoIdMutationResult(after, profile.jotmoId)
   }
 
   async listSources(
@@ -2573,6 +2721,46 @@ export class JotmoService {
       throw new JotmoPluginError('captcha-required', '请先完成安全验证', false)
     }
     return normalized
+  }
+
+  private async remoteJotmoIdAvailability(
+    name: string,
+    initialSession?: JotmoSessionCredentials,
+  ): Promise<JotmoIdAvailabilitySnapshot> {
+    const data = await this.authenticatedAuthPost<Record<string, unknown>>(
+      '/api/v1/auth/check-jotmo-id-available',
+      { name, scene: 'user_update' },
+      initialSession,
+    )
+    const available = data.available === true
+    return {
+      available,
+      reason: available ? '' : jotmoIdAvailabilityReason(data.reason),
+      jotmoId: stringValue(data.name).trim() || name,
+    }
+  }
+
+  private async tryRefreshProfile(): Promise<JotmoUserProfileSnapshot | undefined> {
+    try {
+      return await this.refreshProfile()
+    } catch {
+      return undefined
+    }
+  }
+
+  private jotmoIdMutationResult(
+    snapshot: JotmoUserProfileSnapshot,
+    previousJotmoId: string,
+  ): JotmoIdMutationResult {
+    if (snapshot.profile === null) {
+      throw new JotmoPluginError('profile-contract-invalid', '即我个人资料当前不可用', true, 502)
+    }
+    return {
+      jotmoId: snapshot.profile.jotmoId,
+      changed: snapshot.profile.jotmoId !== previousJotmoId,
+      canUpdate: snapshot.profile.canUpdateJotmoId ?? false,
+      revision: snapshot.revision,
+    }
   }
 
   private async authenticatedAuthGet<T>(

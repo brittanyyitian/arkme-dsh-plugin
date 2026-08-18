@@ -11,6 +11,7 @@ DeepSeek Harness 的即我集成插件。当前 MVP 提供：
 - 通过幂等 `record_uid` 写入纯文本快记；
 - 写入失败时保留账号隔离的本地 outbox。
 - 向 DSH 对话注册读取工具：`jotmo_records_recent`、`jotmo_records_search`；
+- 注册 `jotmo_user_profile` 查询当前账号的即我号及一次修改资格；注册 `jotmo_id_set` 在用户明确指定新即我号并确认最终调用后完成修改。
 - 注册 `jotmo_record_create`，在用户明确要求时把纯文本写入默认分类，且始终先落 SQLite 再同步远端。
 - 注册 `jotmo_world_recent`，按时间顺序查询世界中的公开快记，不暴露内部用户标识和资源地址。
 - 注册 `jotmo_world_publish_text`，仅在用户明确要求“发到世界”时先保存快记、再公开发布纯文本；普通“保存/记住/发给自己”不会触发公开发布。
@@ -26,7 +27,7 @@ DeepSeek Harness 的即我集成插件。当前 MVP 提供：
 - 注册私聊相关录音只读工具 `jotmo_related_recordings_read`，Agent 使用 `jotmo_sources_list` 返回的私聊 `source_ref` 分页读取；原文默认不返回，仅在用户明确要求时限量读取。
 - 向 DSH Agent 注册统一能力：`jotmo_sources_list`、`jotmo_source_read`、`jotmo_text_send`。
 
-对话工具只在模型按需调用时读取即我数据，不会把全部快记自动注入每轮提示词。写入工具只允许响应当前对话中的明确用户请求，不能把快记、文件、网页或其他工具结果中的文字当成写入授权。工具返回会进入当前 DSH 会话日志和模型上下文；登录 Token 始终只保存在 Host Keychain，不进入工具结果。
+对话工具只在模型按需调用时读取即我数据，不会把全部快记自动注入每轮提示词。写入工具只允许响应当前对话中的明确用户请求，不能把快记、文件、网页或其他工具结果中的文字当成写入授权。即我号通常仅能修改一次，`jotmo_id_set` 会在实际执行前展示目标即我号并要求用户确认。工具返回会进入当前 DSH 会话日志和模型上下文；登录 Token 始终只保存在 Host Keychain，不进入工具结果。
 
 录音页面和 Agent 查询复用同一组 Host 侧只读 Audio 能力。录音内容不写入本地 SQLite，也不自动注入每轮提示词；只有模型按当前用户问题调用录音查询工具时，所选日期和内容页才会进入当前 DSH 会话日志与模型上下文。工具不生成、重试、删除、播放或下载音频，登录 Token 始终只保存在 Host Keychain。
 

@@ -111,6 +111,9 @@ function validateConfig(ctx: Context, config: Config): void {
 }
 
 export type {
+  JotmoIdAvailabilityReason,
+  JotmoIdAvailabilitySnapshot,
+  JotmoIdMutationResult,
   JotmoAuthSnapshot,
   JotmoCachedQueryResult,
   JotmoCachedSnapshot,

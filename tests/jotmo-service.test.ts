@@ -3,7 +3,7 @@ import { JotmoPluginError, JotmoService, type JotmoServiceConfig } from '../src/
 import type { JotmoSessionCredentials } from '../src/keychain-store.js'
 import type { JotmoPendingWrite } from '../src/types.js'
 import type {
-  JotmoRecordCursor, JotmoSelfRecordItem, JotmoSelfRecordList, JotmoSelfSummary,
+  JotmoCachedQueryResult, JotmoRecordCursor, JotmoSelfRecordItem, JotmoSelfRecordList, JotmoSelfSummary,
   JotmoUserProfile, JotmoUserProfileSnapshot,
 } from '../src/types.js'
 
@@ -39,6 +39,23 @@ class MemoryStateStore {
       ...(this.page?.nextCursor === undefined ? {} : { nextCursor: this.page.nextCursor }),
       ...(this.summary === undefined ? {} : { summary: this.summary }),
       cachedAtMillis: this.page === undefined && this.summary === undefined ? 0 : 1,
+      revision: this.revisionValue,
+    }
+  }
+  async queryCached(
+    userId: number,
+    options: { query?: string; limit: number; beforeMillis?: number },
+  ): Promise<JotmoCachedQueryResult> {
+    const query = options.query?.trim().toLowerCase() ?? ''
+    const beforeMillis = options.beforeMillis ?? Number.MAX_SAFE_INTEGER
+    const items = (this.cached.get(userId) ?? [])
+      .filter(item => item.sendAtMillis < beforeMillis)
+      .filter(item => query === '' || item.textContent.toLowerCase().includes(query) || item.title.toLowerCase().includes(query))
+      .slice(0, options.limit)
+    return {
+      items,
+      cacheComplete: this.page?.hasMore !== true,
+      cachedAtMillis: this.page === undefined ? 0 : 1,
       revision: this.revisionValue,
     }
   }
@@ -591,7 +608,9 @@ describe('JotmoService', () => {
           nick_name: '昵称',
           real_name: '完整真实姓名',
           head_img: 'avatar-file-id',
-          name_slug: 'jiwo-10001',
+          name_slug: 'legacy-name-slug',
+          jotmo_id: 'jiwo-10001',
+          can_update_jotmo_id: true,
           type: 1,
           create_at: 123,
           phone: '13800138000',
@@ -610,6 +629,7 @@ describe('JotmoService', () => {
       nickname: '昵称',
       avatarRef: 'avatar-file-id',
       jotmoId: 'jiwo-10001',
+      canUpdateJotmoId: true,
       accountType: 1,
       createdAt: 123,
       bindings: { apple: true, wechat: false, google: true },
@@ -619,6 +639,161 @@ describe('JotmoService', () => {
     expect(JSON.stringify(snapshot)).not.toContain('13800138000')
     expect(JSON.stringify(snapshot)).not.toContain('test@example.com')
     await expect(service.cachedProfile()).resolves.toEqual(snapshot)
+  })
+
+  it('falls back to the legacy name slug when the canonical Jiwo ID is absent', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const service = new JotmoService(config, sessions, state, async () => json({
+      code: 200,
+      data: {
+        user_id: 10001,
+        nick_name: '昵称',
+        name_slug: 'legacy-id',
+        type: 1,
+      },
+    }))
+
+    await expect(service.refreshProfile()).resolves.toMatchObject({
+      profile: { jotmoId: 'legacy-id' },
+    })
+    expect(state.profile).not.toHaveProperty('canUpdateJotmoId')
+  })
+
+  it('checks availability and sets the current user Jiwo ID once', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const calls: Array<{ url: string; method?: string; body?: Record<string, unknown> }> = []
+    let profileReads = 0
+    const service = new JotmoService(config, sessions, state, async (input, init) => {
+      const url = String(input)
+      calls.push({
+        url,
+        ...(init?.method === undefined ? {} : { method: init.method }),
+        ...(init?.body === undefined ? {} : {
+          body: JSON.parse(String(init.body)) as Record<string, unknown>,
+        }),
+      })
+      if (url.endsWith('/get-user-info')) {
+        profileReads += 1
+        return json({
+          code: 200,
+          data: {
+            user_id: 10001,
+            nick_name: '昵称',
+            name_slug: 'legacy-id',
+            jotmo_id: profileReads === 1 ? 'legacy-id' : 'New_id-01',
+            can_update_jotmo_id: profileReads === 1,
+            type: 1,
+          },
+        })
+      }
+      if (url.endsWith('/check-jotmo-id-available')) {
+        return json({ code: 200, data: { available: true, name: 'New_id-01' } })
+      }
+      if (url.endsWith('/update-jotmo-id')) {
+        return json({ code: 200, data: { name: 'New_id-01' } })
+      }
+      throw new Error(`unexpected ${url}`)
+    })
+
+    await expect(service.setJotmoIdOnce('  New_id-01  ')).resolves.toMatchObject({
+      jotmoId: 'New_id-01',
+      changed: true,
+      canUpdate: false,
+    })
+    expect(calls.map(call => [call.method, new URL(call.url).pathname])).toEqual([
+      ['GET', '/api/v1/auth/get-user-info'],
+      ['POST', '/api/v1/auth/check-jotmo-id-available'],
+      ['POST', '/api/v1/auth/update-jotmo-id'],
+      ['GET', '/api/v1/auth/get-user-info'],
+    ])
+    expect(calls[1]?.body).toEqual({ name: 'New_id-01', scene: 'user_update' })
+    expect(calls[2]?.body).toEqual({ name: 'New_id-01' })
+    expect(state.profile).toMatchObject({ jotmoId: 'New_id-01', canUpdateJotmoId: false })
+  })
+
+  it('does not consume the one-time change when the requested Jiwo ID is already current', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const fetchImpl = vi.fn<typeof fetch>(async () => json({
+      code: 200,
+      data: {
+        user_id: 10001,
+        nick_name: '昵称',
+        jotmo_id: 'Current_01',
+        can_update_jotmo_id: true,
+        type: 1,
+      },
+    }))
+    const service = new JotmoService(config, sessions, state, fetchImpl)
+
+    await expect(service.setJotmoIdOnce('Current_01')).resolves.toMatchObject({
+      jotmoId: 'Current_01', changed: false, canUpdate: true,
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+  })
+
+  it('validates Jiwo IDs locally and maps authoritative availability reasons', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/get-user-info')) return json({
+        code: 200,
+        data: { user_id: 10001, jotmo_id: 'legacy-id', can_update_jotmo_id: true, type: 1 },
+      })
+      if (url.endsWith('/check-jotmo-id-available')) return json({
+        code: 200,
+        data: { available: false, reason: 'taken', name: 'Taken_01' },
+      })
+      throw new Error(`unexpected ${url}`)
+    })
+    const service = new JotmoService(config, sessions, state, fetchImpl)
+
+    await expect(service.setJotmoIdOnce('1bad-id')).rejects.toMatchObject({
+      code: 'jotmo-id-leading-character-invalid', retryable: false,
+    })
+    await expect(service.setJotmoIdOnce('Taken_01')).rejects.toMatchObject({
+      code: 'jotmo-id-taken', retryable: false, httpStatus: 409,
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('reconciles an unknown update outcome by reading back the current Jiwo ID', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    let profileReads = 0
+    const service = new JotmoService(config, sessions, state, async (input) => {
+      const url = String(input)
+      if (url.endsWith('/get-user-info')) {
+        profileReads += 1
+        return json({
+          code: 200,
+          data: {
+            user_id: 10001,
+            jotmo_id: profileReads === 1 ? 'legacy-id' : 'Reconciled_01',
+            can_update_jotmo_id: profileReads === 1,
+            type: 1,
+          },
+        })
+      }
+      if (url.endsWith('/check-jotmo-id-available')) {
+        return json({ code: 200, data: { available: true, name: 'Reconciled_01' } })
+      }
+      if (url.endsWith('/update-jotmo-id')) throw new TypeError('socket closed after write')
+      throw new Error(`unexpected ${url}`)
+    })
+
+    await expect(service.setJotmoIdOnce('Reconciled_01')).resolves.toMatchObject({
+      jotmoId: 'Reconciled_01', changed: true, canUpdate: false,
+    })
+    expect(profileReads).toBe(2)
   })
 
   it('authorizes and downloads only the current user private profile image', async () => {
@@ -632,9 +807,11 @@ describe('JotmoService', () => {
       const url = String(input)
       requests.push({
         url,
-        ...(init?.headers === undefined ? {} : {
-          authorization: new Headers(init.headers).get('Authorization') ?? undefined,
-        }),
+        ...(() => {
+          if (init?.headers === undefined) return {}
+          const authorization = new Headers(init.headers).get('Authorization')
+          return authorization === null ? {} : { authorization }
+        })(),
         ...(init?.body === undefined ? {} : {
           body: JSON.parse(String(init.body)) as Record<string, unknown>,
         }),

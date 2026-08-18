@@ -5,6 +5,7 @@ import {
   createJotmoToolDefinitions,
   JOTMO_TOOL_PROMPT,
   recordUidForToolCall,
+  registerJotmoConversationTools,
 } from '../src/jotmo-tools.js'
 import { createJotmoImageToolDefinition } from '../src/jotmo-image-tool.js'
 import { JOTMO_RECORDING_TOOL_PROMPT } from '../src/recording-tools.js'
@@ -31,6 +32,7 @@ function fakeService(): JotmoConversationReadService & {
   createTextForConversation: ReturnType<typeof vi.fn>
   listWorldRecords: ReturnType<typeof vi.fn>
   publishWorldTextForConversation: ReturnType<typeof vi.fn>
+  setJotmoIdOnce: ReturnType<typeof vi.fn>
 } {
   return {
     providerCapabilities: () => ({
@@ -78,6 +80,7 @@ function fakeService(): JotmoConversationReadService & {
         nickname: '昵称',
         avatarRef: 'avatar',
         jotmoId: 'jiwo-id',
+        canUpdateJotmoId: true,
         accountType: 1,
         createdAt: 1,
         bindings: { apple: true, wechat: false, google: false },
@@ -85,6 +88,12 @@ function fakeService(): JotmoConversationReadService & {
       },
       cachedAtMillis: 1,
       revision: 8,
+    })),
+    setJotmoIdOnce: vi.fn(async (jotmoId: string) => ({
+      jotmoId,
+      changed: true,
+      canUpdate: false,
+      revision: 9,
     })),
     listSources: vi.fn(async (directory: 'root' | 'send_to_self') => ({ directory, items: [], hasMore: false })),
     readSource: vi.fn(async (sourceRef: string) => ({
@@ -254,6 +263,55 @@ describe('Jotmo conversation tools', () => {
     expect(output).not.toContain('realName')
   })
 
+  it('sets the exact user-selected Jiwo ID without echoing unrelated profile data', async () => {
+    const service = fakeService()
+    const tool = createJotmoToolDefinitions(service).find(definition => definition.name === 'jotmo_id_set')!
+    const output = await tool.execute(
+      { jotmo_id: 'Chosen_01' },
+      { signal: new AbortController().signal } as never,
+    ) as string
+
+    expect(service.setJotmoIdOnce).toHaveBeenCalledWith('Chosen_01')
+    expect(output).toContain('jotmo_id_changed=true')
+    expect(output).toContain('can_update_again=false')
+    expect(output).toContain('"jotmoId": "Chosen_01"')
+    expect(output).not.toContain('138****8000')
+  })
+
+  it('requires explicit approval for the one-time Jiwo ID write and preserves downstream decisions', async () => {
+    let preExecute: ((exec: {
+      name: string
+      arguments: Record<string, unknown>
+    }, next: () => Promise<{ kind: string; reason?: string }>) => Promise<{ kind: string; reason?: string }>) | undefined
+    const ctx = {
+      systemPrompt: { section: vi.fn() },
+      tools: { register: vi.fn() },
+      on: vi.fn((event: string, listener: typeof preExecute) => {
+        expect(event).toBe('tools/pre-execute')
+        preExecute = listener
+      }),
+      inject: vi.fn(),
+    }
+
+    registerJotmoConversationTools(ctx as never, fakeService() as never)
+    expect(preExecute).toBeDefined()
+
+    const ask = await preExecute!(
+      { name: 'jotmo_id_set', arguments: { jotmo_id: 'Chosen_01' } },
+      async () => ({ kind: 'allow' }),
+    )
+    expect(ask).toEqual({
+      kind: 'ask',
+      reason: '即我号通常只能修改一次。确认将当前账号的即我号设置为“Chosen_01”吗？',
+    })
+
+    const denied = { kind: 'deny', reason: 'blocked by policy' }
+    await expect(preExecute!(
+      { name: 'jotmo_id_set', arguments: { jotmo_id: 'Chosen_01' } },
+      async () => denied,
+    )).resolves.toBe(denied)
+  })
+
   it('returns an authorized Jiwo profile image as a durable model image block', async () => {
     const readImage = vi.fn(async () => ({
       mediaType: 'image/png' as const,
@@ -305,7 +363,7 @@ describe('Jotmo conversation tools', () => {
         concludeTurn: vi.fn(),
       } as never,
     )
-    const content = tool.output.render({ image_ref: '10001_1700000000_1_0.png' }, value)
+    const content = tool.output.render({ image_ref: '10001_1700000000_1_0.png' }, value as never)
 
     expect(readImage).toHaveBeenCalledWith('10001_1700000000_1_0.png', expect.objectContaining({ maxBytes: 1024 }))
     expect(saveImage).toHaveBeenCalledOnce()

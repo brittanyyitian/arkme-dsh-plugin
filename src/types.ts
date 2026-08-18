@@ -169,6 +169,8 @@ export interface JotmoUserProfile {
   avatarRef: string
   avatarUrl?: string
   jotmoId: string
+  /** Whether this account can still use its one-time Jiwo ID change. Omitted for legacy cached profiles. */
+  canUpdateJotmoId?: boolean
   accountType: number
   createdAt: number
   bindings: {
@@ -185,6 +187,21 @@ export interface JotmoUserProfile {
 export interface JotmoUserProfileSnapshot {
   profile: JotmoUserProfile | null
   cachedAtMillis: number
+  revision: number
+}
+
+export type JotmoIdAvailabilityReason = '' | 'invalid' | 'taken' | 'modify_limited' | 'server_busy'
+
+export interface JotmoIdAvailabilitySnapshot {
+  available: boolean
+  reason: JotmoIdAvailabilityReason
+  jotmoId: string
+}
+
+export interface JotmoIdMutationResult {
+  jotmoId: string
+  changed: boolean
+  canUpdate: boolean
   revision: number
 }
 

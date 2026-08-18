@@ -96,6 +96,7 @@ describe('JotmoLocalDatabase', () => {
       nickname: '测试用户',
       avatarRef: 'avatar-file-id',
       jotmoId: 'jotmo-id',
+      canUpdateJotmoId: false,
       accountType: 1,
       createdAt: 123,
       bindings: { apple: true, wechat: false, google: true },
