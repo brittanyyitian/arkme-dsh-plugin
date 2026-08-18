@@ -4,7 +4,7 @@ export interface JotmoUiState {
   open: boolean
   surfaceOpen: boolean
   authRevision: number
-  mode: 'login' | 'source'
+  mode: 'login' | 'source' | 'recordings'
   selectedSource?: JotmoSourceItem
 }
 
@@ -63,6 +63,11 @@ export class JotmoUiController {
 
   selectSource(source: JotmoSourceItem): void {
     this.publish({ ...this.state, open: true, mode: 'source', selectedSource: source })
+  }
+
+  showRecordings(): void {
+    const { selectedSource: _selectedSource, ...rest } = this.state
+    this.publish({ ...rest, open: true, mode: 'recordings' })
   }
 
   private publish(next: JotmoUiState): void {

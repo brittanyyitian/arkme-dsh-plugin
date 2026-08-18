@@ -87,6 +87,7 @@ const config: JotmoServiceConfig = {
   authBaseUrl: 'https://auth.test',
   recordBaseUrl: 'https://record.test',
   chatBaseUrl: 'https://chat.test',
+  audioBaseUrl: 'https://audio.test',
   requestTimeoutMs: 5000,
   maxTextLength: 20000,
   geetestCaptchaId: 'captcha-test-id-1234567890',
@@ -100,6 +101,232 @@ function json(data: unknown, status = 200): Response {
 }
 
 describe('JotmoService', () => {
+  it('reads the recording calendar from the Audio origin with bearer authorization', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe('https://audio.test/api/v1/audio/get-calender-summary')
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer access')
+      expect(JSON.parse(String(init?.body))).toEqual({ from_stamp: 1_700_000_000_000, to_stamp: 1_700_172_800_000 })
+      return json({ code: 200, data: {
+        duration_ls: [0, 90_000],
+        un_click_session_ids_per_day: [[], ['session-1', 'session-2']],
+      } })
+    })
+    const service = new JotmoService(config, sessions, state, fetchImpl)
+
+    await expect(service.recordingCalendar(1_700_000_000_000, 1_700_172_800_000)).resolves.toEqual({
+      fromStamp: 1_700_000_000_000,
+      toStamp: 1_700_172_800_000,
+      days: [
+        { dateStamp: 1_700_000_000_000, durationMillis: 0, hasRecording: false, unreviewedCount: 0 },
+        { dateStamp: 1_700_086_400_000, durationMillis: 90_000, hasRecording: true, unreviewedCount: 2 },
+      ],
+    })
+  })
+
+  it('loads recording day sections independently and refreshes an expired Audio bearer', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'expired', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = []
+    let rejected = false
+    const dayStamp = new Date(2023, 10, 15).getTime()
+    const service = new JotmoService(config, sessions, state, async (input, init) => {
+      const url = String(input)
+      const authorization = new Headers(init?.headers).get('Authorization') ?? ''
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      requests.push({ url, authorization, body })
+      if (url === 'https://audio.test/api/v1/audio/one-day-trans-v2' && !rejected) {
+        rejected = true
+        return json({}, 401)
+      }
+      if (url === 'https://auth.test/api/public/v1/auth/new-short') {
+        return json({ code: 200, data: { access_token: 'renewed' } })
+      }
+      if (url.endsWith('/api/v1/audio/one-day-trans-v2')) {
+        return json({ code: 200, data: {
+          session_ls: [{ id: 'session-1', start_at: dayStamp + 1_000, duration: 6_000, belong_usr: 10001,
+            spk_ls: [{ num: 1, spk_id: 'speaker-1', label: '' }] }],
+          child_ls: [{ id: 'child-1', session_id: 'session-1', start_at: 500,
+            asr: [{ s: 100, e: 800, n: 1, t: '今天很顺利', effective_spk_id: 'speaker-1', b: 0 }] }],
+        } })
+      }
+      if (url.endsWith('/api/v1/audio/get-speaker-ls')) {
+        return json({ code: 200, data: { spk_ls: [{ id: 'speaker-1', ref_usr_id: 10001, nick_name: '本人' }] } })
+      }
+      if (url.endsWith('/api/v1/summary/list-timeline-by-range') && body.kind === 1) {
+        return json({ code: 200, data: { audio_summary_ls: [
+          { id: 'timeline-1', kind: 1, status: 2, update_at: dayStamp + 5_000, answer: '09:00-09:30 早会' },
+        ] } })
+      }
+      if (url.endsWith('/api/v1/summary/list-timeline-by-range') && body.kind === 2) {
+        return json({ code: 500, message: '总结服务暂不可用' })
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    const day = await service.recordingDay(dayStamp)
+    expect(day).toMatchObject({
+      dateStamp: dayStamp,
+      totalDurationMillis: 6_000,
+      transcript: { state: 'ready', items: [{ speakerLabel: '说话人 1', startAtMillis: dayStamp + 1_600 }] },
+      timeline: { state: 'ready', items: [{ id: 'timeline-1', selectable: true }] },
+      summary: { state: 'error', items: [] },
+    })
+    expect(sessions.session?.accessToken).toBe('renewed')
+    expect(requests.filter(item => item.url.endsWith('/one-day-trans-v2')).map(item => item.authorization))
+      .toEqual(['Bearer expired', 'Bearer renewed'])
+    expect(requests.filter(item => item.url.endsWith('/list-timeline-by-range')).map(item => item.body.kind).sort())
+      .toEqual([1, 2])
+  })
+
+  it('loads only transcript and speaker endpoints for a transcript query', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const urls: string[] = []
+    const dayStamp = new Date(2023, 10, 15).getTime()
+    const service = new JotmoService(config, sessions, state, async (input) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.endsWith('/api/v1/audio/one-day-trans-v2')) {
+        return json({ code: 200, data: { session_ls: [], child_ls: [] } })
+      }
+      if (url.endsWith('/api/v1/audio/get-speaker-ls')) {
+        return json({ code: 200, data: { spk_ls: [] } })
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(service.recordingTranscript(dayStamp)).resolves.toEqual({
+      state: 'empty',
+      items: [],
+      message: '当天无录音',
+      identityCoverage: 'complete',
+      totalDurationMillis: 0,
+    })
+    expect(urls).toEqual([
+      'https://audio.test/api/v1/audio/one-day-trans-v2',
+      'https://audio.test/api/v1/audio/get-speaker-ls',
+    ])
+  })
+
+  it.each([
+    ['summary' as const, 2],
+    ['timeline' as const, 1],
+  ])('loads only the %s endpoint for a projection query', async (kind, apiKind) => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = []
+    const dayStamp = new Date(2023, 10, 15).getTime()
+    const service = new JotmoService(config, sessions, state, async (input, init) => {
+      const url = String(input)
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      requests.push({ url, body })
+      return json({ code: 200, data: { audio_summary_ls: [] } })
+    })
+
+    await expect(service.recordingProjection(dayStamp, kind)).resolves.toEqual({
+      state: 'empty',
+      items: [],
+      message: '暂无已生成内容',
+    })
+    expect(requests).toEqual([{
+      url: 'https://audio.test/api/v1/summary/list-timeline-by-range',
+      body: {
+        from_stamp: dayStamp,
+        to_stamp: new Date(2023, 10, 16).getTime(),
+        date_stamp: dayStamp,
+        kind: apiKind,
+      },
+    }])
+  })
+
+  it('keeps transcript readable when speaker identity lookup fails', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const dayStamp = new Date(2023, 10, 15).getTime()
+    const service = new JotmoService(config, sessions, state, async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/v1/audio/one-day-trans-v2')) {
+        return json({ code: 200, data: {
+          session_ls: [{
+            id: 'session-1', start_at: dayStamp + 1_000, duration: 6_000, belong_usr: 10001,
+            spk_ls: [{ num: 1, spk_id: 'speaker-1' }],
+          }],
+          child_ls: [{
+            id: 'child-1', session_id: 'session-1', start_at: 500,
+            asr: [{ s: 100, e: 800, n: 1, t: '今天很顺利', effective_spk_id: 'speaker-1', b: 0 }],
+          }],
+        } })
+      }
+      if (url.endsWith('/api/v1/audio/get-speaker-ls')) {
+        return json({ code: 500, message: '说话人服务暂不可用' })
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(service.recordingTranscript(dayStamp)).resolves.toMatchObject({
+      state: 'ready',
+      identityCoverage: 'partial',
+      totalDurationMillis: 6_000,
+      items: [{ text: '今天很顺利', speakerLabel: '说话人 1', isSelf: false }],
+    })
+  })
+
+  it('propagates cancellation to transcript Audio requests', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const dayStamp = new Date(2023, 10, 15).getTime()
+    const seenSignals: AbortSignal[] = []
+    const service = new JotmoService(config, sessions, state, async (_input, init) => {
+      const signal = init?.signal as AbortSignal
+      seenSignals.push(signal)
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+      })
+    })
+    const controller = new AbortController()
+    const pending = service.recordingTranscript(dayStamp, controller.signal)
+    await vi.waitFor(() => expect(seenSignals).toHaveLength(2))
+
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ code: 'jotmo-timeout' })
+    expect(seenSignals.every(signal => signal.aborted)).toBe(true)
+  })
+
+  it('binds recording cursors to the current account and rejects tampering', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const state = new MemoryStateStore()
+    const service = new JotmoService(config, sessions, state, vi.fn())
+    const payload = {
+      version: 1 as const,
+      dateStamp: new Date(2026, 7, 17).getTime(),
+      content: 'transcript' as const,
+      itemOffset: 10,
+      textOffset: 0,
+      fingerprint: 'sha256-value',
+    }
+
+    const cursor = await service.sealRecordingCursor(payload)
+
+    await expect(service.openRecordingCursor(cursor)).resolves.toEqual(payload)
+    await expect(service.openRecordingCursor(`${cursor.slice(0, -1)}x`)).rejects.toMatchObject({
+      code: 'recording-cursor-invalid',
+    })
+    sessions.session = { userId: 10002, accessToken: 'other', refreshToken: 'other-refresh' }
+    await expect(service.openRecordingCursor(cursor)).rejects.toMatchObject({
+      code: 'recording-cursor-invalid',
+    })
+  })
+
   it('completes QR login without exposing tokens in the auth snapshot', async () => {
     const sessions = new MemorySessionStore()
     const state = new MemoryStateStore()

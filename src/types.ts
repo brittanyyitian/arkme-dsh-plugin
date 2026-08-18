@@ -211,6 +211,98 @@ export interface JotmoSourceSendResult {
   error?: string
 }
 
+export interface JotmoRecordingCalendarDay {
+  dateStamp: number
+  durationMillis: number
+  hasRecording: boolean
+  unreviewedCount: number
+}
+
+export interface JotmoRecordingCalendarMonth {
+  fromStamp: number
+  toStamp: number
+  days: JotmoRecordingCalendarDay[]
+}
+
+export interface JotmoRecordingTranscriptItem {
+  itemId: string
+  sessionId: string
+  childId: string
+  startAtMillis: number
+  endAtMillis: number
+  speakerNumber: number
+  speakerColorIndex: number
+  speakerLabel: string
+  isSelf: boolean
+  isBackground: boolean
+  text: string
+}
+
+export interface JotmoRecordingTimelineEvent {
+  eventId: string
+  startAt: string
+  endAt: string
+  timeRange: string
+  title: string
+  description: string
+  scene: string
+  emotion: string
+  todo: string
+  tags: string[]
+  participants: string[]
+  rawText: string
+}
+
+export type JotmoRecordingVersionStatus = 'processing' | 'done' | 'failed'
+export type JotmoRecordingSectionState = 'ready' | 'empty' | 'processing' | 'failed' | 'error'
+export type JotmoRecordingProjectionKind = 'summary' | 'timeline'
+export type JotmoRecordingIdentityCoverage = 'complete' | 'partial'
+export type JotmoRecordingToolContent = 'transcript' | 'summary' | 'timeline'
+
+export interface JotmoRecordingVersion {
+  id: string
+  status: JotmoRecordingVersionStatus
+  selectable: boolean
+  generationStage: number
+  generatedAtMillis: number
+  modelDisplayName: string
+  content: string
+  timelineEvents: JotmoRecordingTimelineEvent[]
+  error: string
+}
+
+export interface JotmoRecordingSection<T> {
+  state: JotmoRecordingSectionState
+  items: T[]
+  message: string
+}
+
+export interface JotmoRecordingTranscriptSection
+  extends JotmoRecordingSection<JotmoRecordingTranscriptItem> {
+  identityCoverage: JotmoRecordingIdentityCoverage
+  totalDurationMillis: number
+}
+
+export type JotmoRecordingVersionSection = JotmoRecordingSection<JotmoRecordingVersion>
+
+export interface JotmoRecordingCursorPayload {
+  version: 1
+  dateStamp: number
+  content: JotmoRecordingToolContent
+  versionId?: string
+  itemOffset: number
+  textOffset: number
+  fingerprint: string
+}
+
+export interface JotmoRecordingDay {
+  dateStamp: number
+  totalDurationMillis: number
+  transcript: JotmoRecordingSection<JotmoRecordingTranscriptItem>
+  summary: JotmoRecordingSection<JotmoRecordingVersion>
+  timeline: JotmoRecordingSection<JotmoRecordingVersion>
+}
+
 export interface JotmoProviderState {
   contractVersion: typeof JOTMO_PROVIDER_CONTRACT_VERSION
   environment: JotmoEnvironment
@@ -244,8 +336,12 @@ export type JotmoPluginOperation =
   | 'source.timeline'
   | 'source.send-text'
 
+export type JotmoHostOperation = JotmoPluginOperation
+  | 'recordings.calendar'
+  | 'recordings.day'
+
 export interface JotmoPluginRequest {
-  operation: JotmoPluginOperation
+  operation: JotmoHostOperation
   params?: Record<string, unknown>
 }
 

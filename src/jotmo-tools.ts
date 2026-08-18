@@ -7,13 +7,18 @@ import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-llm'
 import { createJotmoImageToolDefinition } from './jotmo-image-tool.js'
 import type { JotmoImageReadService } from './jotmo-image-tool.js'
+import {
+  createJotmoRecordingToolDefinitions,
+  JOTMO_RECORDING_TOOL_PROMPT,
+  type JotmoRecordingReadService,
+} from './recording-tools.js'
 import type {
   JotmoCachedQueryResult, JotmoConversationWriteResult, JotmoProviderCapabilities,
   JotmoSourceDirectory, JotmoSourceList, JotmoSourceSendResult, JotmoTimelineCursor, JotmoTimelinePage,
   JotmoUserProfileSnapshot,
 } from './types.js'
 
-export interface JotmoConversationReadService {
+export interface JotmoConversationReadService extends JotmoRecordingReadService {
   providerCapabilities(): JotmoProviderCapabilities
   refreshLatest(): Promise<void>
   syncHistory(maxPages?: number, signal?: AbortSignal): Promise<{ pages: number; complete: boolean }>
@@ -320,12 +325,26 @@ export function createJotmoToolDefinitions(service: JotmoConversationReadService
   ]
 }
 
+export function createAllJotmoToolDefinitions(
+  service: JotmoConversationReadService,
+): ToolDefinition[] {
+  return [
+    ...createJotmoToolDefinitions(service),
+    ...createJotmoRecordingToolDefinitions(service),
+  ]
+}
+
 export function registerJotmoConversationTools(
   ctx: Context,
   service: JotmoConversationReadService & JotmoImageReadService,
 ): void {
   ctx.systemPrompt.section({ name: 'tool:jotmo-records', order: 116, text: JOTMO_TOOL_PROMPT })
-  for (const definition of createJotmoToolDefinitions(service)) ctx.tools.register(definition)
+  ctx.systemPrompt.section({
+    name: 'tool:jotmo-recordings',
+    order: 117,
+    text: JOTMO_RECORDING_TOOL_PROMPT,
+  })
+  for (const definition of createAllJotmoToolDefinitions(service)) ctx.tools.register(definition)
   ctx.inject(['attachments'], imageCtx => {
     imageCtx.tools.register(createJotmoImageToolDefinition(imageCtx, service))
   })

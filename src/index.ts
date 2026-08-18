@@ -16,6 +16,7 @@ export interface Config {
   authBaseUrl: string
   recordBaseUrl: string
   chatBaseUrl: string
+  audioBaseUrl: string
   routePath: string
   requestTimeoutMs: number
   maxTextLength: number
@@ -31,6 +32,7 @@ export const Config: Schema<Config> = Schema.object({
   authBaseUrl: Schema.string().default('https://jotmo.senguo.me'),
   recordBaseUrl: Schema.string().default('https://jotmo-record.senguo.me'),
   chatBaseUrl: Schema.string().default('https://jotmo-chat.senguo.me'),
+  audioBaseUrl: Schema.string().default('https://jotmo-audio.senguo.me'),
   routePath: Schema.string().default('/jotmo-self/api'),
   requestTimeoutMs: Schema.number().min(1000).max(120000).default(30000),
   maxTextLength: Schema.number().min(1).max(100000).default(20000),
@@ -91,6 +93,7 @@ function validateConfig(ctx: Context, config: Config): void {
     ['authBaseUrl', config.authBaseUrl],
     ['recordBaseUrl', config.recordBaseUrl],
     ['chatBaseUrl', config.chatBaseUrl],
+    ['audioBaseUrl', config.audioBaseUrl],
   ] as const) {
     const url = new URL(raw)
     if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.pathname !== '/') {

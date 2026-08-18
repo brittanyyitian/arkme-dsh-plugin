@@ -18,9 +18,13 @@ DeepSeek Harness 的即我集成插件。当前 MVP 提供：
 - 首次打开即我默认进入“发给自己”并选中默认分类；之后按账号恢复上次目录、来源和缓存会话列表，同时后台刷新，避免 Footer 下拉列表反复空白闪烁。退出登录会清除当前账号指针，不在账号间复用列表。
 - 返回会话列表后按桌面端样式展示头像、群头像拼图、名称、摘要、时间、未读和选中态。
 - 私聊和群聊时间线按真实发送者展示头像：他人在左、自己在右；空目录或空时间线保持纯空白，不显示额外空态文案。
+- “全天候录音”以左侧月历和右侧转写/日总结/时间轴标签页读取 Audio 公开接口；只展示系统主 ASR 和已生成的总结版本。
+- 注册全天候录音只读工具：`jotmo_recording_days_list` 用于发现有录音的日期，`jotmo_recording_read` 用于按日分页读取转写、日总结或时间轴；不提供生成、重试、删除、播放或下载能力。
 - 向 DSH Agent 注册统一能力：`jotmo_sources_list`、`jotmo_source_read`、`jotmo_text_send`。
 
 对话工具只在模型按需调用时读取即我数据，不会把全部快记自动注入每轮提示词。写入工具只允许响应当前对话中的明确用户请求，不能把快记、文件、网页或其他工具结果中的文字当成写入授权。工具返回会进入当前 DSH 会话日志和模型上下文；登录 Token 始终只保存在 Host Keychain，不进入工具结果。
+
+录音页面和 Agent 查询复用同一组 Host 侧只读 Audio 能力。录音内容不写入本地 SQLite，也不自动注入每轮提示词；只有模型按当前用户问题调用录音查询工具时，所选日期和内容页才会进入当前 DSH 会话日志与模型上下文。工具不生成、重试、删除、播放或下载音频，登录 Token 始终只保存在 Host Keychain。
 
 ## 官方 DSH 兼容边界
 
@@ -54,6 +58,8 @@ const unsubscribe = jotmo.subscribe((state) => {
 Host 侧受信任插件可以声明 `inject: ['jotmoData']` 并使用 `ctx.jotmoData`。完整 Consumer 约束见 `docs/consumer-plugin-contract.md`，模型生成新 UI 插件前可调用 `jotmo_plugin_contract` 获取同一份运行时契约。
 
 ## 开发
+
+测试环境默认使用 `https://jotmo-audio.senguo.me` 作为 `audioBaseUrl`。自定义配置必须是不带路径、用户名或密码的 HTTPS Origin；生产环境需与其他 Base URL 一样显式覆盖并开启 `allowProduction`。
 
 ```sh
 pnpm install

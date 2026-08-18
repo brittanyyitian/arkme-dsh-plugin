@@ -6,6 +6,7 @@
         authBaseUrl: https://api.jotmo.cc
         recordBaseUrl: https://record.jotmo.cc
         chatBaseUrl: https://chat.jotmo.cc
+        audioBaseUrl: https://audio.jotmo.cc
         routePath: /jotmo-self/api
         requestTimeoutMs: 30000
         maxTextLength: 20000

@@ -213,6 +213,11 @@ async function dispatch(
         ...(stringParam(params, 'relationUid') === '' ? {} : { relationUid: stringParam(params, 'relationUid') }),
       },
     )
+    case 'recordings.calendar': return await service.recordingCalendar(
+      numberParam(params, 'fromStamp', 0),
+      numberParam(params, 'toStamp', 0),
+    )
+    case 'recordings.day': return await service.recordingDay(numberParam(params, 'dateStamp', 0))
     default: throw new JotmoPluginError('operation-unknown', '不支持的即我插件操作', false, 404)
   }
 }

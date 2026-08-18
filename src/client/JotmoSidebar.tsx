@@ -11,6 +11,7 @@ import { callJotmo, JotmoClientError } from './api.js'
 import { verifyPhoneCaptcha } from './geetest.js'
 import { JotmoMark } from './JotmoFooterAction.js'
 import { JotmoLogin, type JotmoLoginMode } from './JotmoLogin.js'
+import { JotmoRecordingSurface } from './JotmoRecordingSurface.js'
 import { loadJotmoImageDataUrl } from './JotmoVirtualWorkspace.js'
 import { jotmoUi } from './ui-controller.js'
 
@@ -284,7 +285,7 @@ export function JotmoSurface(_props: JotmoSurfaceProps = {}) {
   return (
     <div style={styles.surface}>
       <section style={styles.panel} role="region" aria-label={source?.displayName ?? '即我'}>
-        <header style={styles.header}><h2 style={styles.title}>{source?.displayName ?? '即我'}</h2></header>
+        <header style={styles.header}><h2 style={styles.title}>{ui.mode === 'recordings' ? '全天候录音' : source?.displayName ?? '即我'}</h2></header>
         {!authenticated ? <div style={styles.loginBody}><JotmoLogin
           mode={loginMode}
           agreed={agreed}
@@ -300,7 +301,8 @@ export function JotmoSurface(_props: JotmoSurfaceProps = {}) {
           onSmsCodeChange={setSmsCode}
           onSendCode={() => { void sendCode() }}
           onVerifyCode={() => { void verifyCode() }}
-        /></div> : source === undefined ? <div style={styles.body} /> : <>
+        /></div> : ui.mode === 'recordings' ? <JotmoRecordingSurface />
+          : source === undefined ? <div style={styles.body} /> : <>
           <div ref={bodyRef} style={styles.body}>
             {error !== '' && <div style={styles.error}>{error}</div>}
             <div ref={sentinelRef} style={styles.sentinel} />
