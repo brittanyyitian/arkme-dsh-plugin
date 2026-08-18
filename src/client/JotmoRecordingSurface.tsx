@@ -46,10 +46,11 @@ const styles: Record<string, CSSProperties> = {
   week: { display: 'grid', gridTemplateColumns: 'repeat(7,minmax(0,1fr))', gap: 4, marginBottom: 4 },
   weekDay: { color: colors.secondary, textAlign: 'center', fontSize: 11, lineHeight: '24px' },
   days: { display: 'grid', gridTemplateColumns: 'repeat(7,minmax(0,1fr))', gap: 4 },
-  day: { position: 'relative', minWidth: 0, height: 42, padding: '5px 2px', border: 0, borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit' },
+  day: { position: 'relative', display: 'grid', gridTemplateRows: '24px 12px', alignContent: 'center', justifyItems: 'center', minWidth: 0, height: 54, padding: '7px 2px', boxSizing: 'border-box', border: 0, borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit' },
+  dayDate: { gridRow: 1, lineHeight: '24px' },
   daySelected: { background: colors.accent, color: '#fff' },
   dayToday: { boxShadow: `inset 0 0 0 1px ${colors.accent}` },
-  duration: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'inherit', opacity: .68, fontSize: 9, lineHeight: '12px' },
+  duration: { gridRow: 2, display: 'block', whiteSpace: 'nowrap', color: 'inherit', opacity: .68, fontSize: 9, lineHeight: '12px' },
   content: { minWidth: 0, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', border: `1px solid ${colors.border}`, borderRadius: 14, overflow: 'hidden', background: '#fff' },
   contentHeader: { flex: 'none', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 18px', borderBottom: `1px solid ${colors.border}` },
   dateControls: { display: 'flex', alignItems: 'center', gap: 8 },
@@ -126,6 +127,12 @@ function shortDuration(milliseconds: number): string {
   return rest === 0 ? `${hours}小时` : `${hours}小时${rest}分`
 }
 
+function calendarDuration(milliseconds: number): string {
+  if (milliseconds <= 0) return ''
+  const roundedHours = Math.max(0.1, Math.round(milliseconds / 360_000) / 10)
+  return `${roundedHours.toFixed(1)}h`
+}
+
 export function RecordingCalendarCell({ date, meta, selected, isToday, onClick }: {
   date: Date
   meta: JotmoRecordingCalendarDay | undefined
@@ -134,8 +141,8 @@ export function RecordingCalendarCell({ date, meta, selected, isToday, onClick }
   onClick(): void
 }) {
   return <button type="button" style={{ ...styles.day, ...(isToday ? styles.dayToday : {}), ...(selected ? styles.daySelected : {}) }} aria-pressed={selected} onClick={onClick}>
-    {date.getDate()}
-    {meta !== undefined && meta.durationMillis > 0 && <span style={styles.duration}>{shortDuration(meta.durationMillis)}</span>}
+    <span style={styles.dayDate}>{date.getDate()}</span>
+    {meta !== undefined && meta.durationMillis > 0 && <span style={styles.duration}>{calendarDuration(meta.durationMillis)}</span>}
   </button>
 }
 
@@ -329,7 +336,7 @@ export function JotmoRecordingSurface() {
   return <div ref={rootRef} style={styles.root}>
     <div style={{
       ...styles.layout,
-      gridTemplateColumns: compact ? 'minmax(0,1fr)' : '260px minmax(0,1fr)',
+      gridTemplateColumns: compact ? 'minmax(0,1fr)' : '320px minmax(0,1fr)',
       gridTemplateRows: compact ? 'auto minmax(0,1fr)' : 'minmax(0,1fr)',
     }}>
       <aside style={styles.calendar} aria-label="录音日历">

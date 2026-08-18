@@ -20,6 +20,13 @@ function matchStyle(markup: string, pattern: RegExp): Map<string, string> {
 }
 
 describe('JotmoRecordingSurface layout', () => {
+  it('widens the desktop calendar column to keep seven cells readable', () => {
+    const markup = renderToStaticMarkup(<JotmoRecordingSurface />)
+    const layout = matchStyle(markup, /<div style="([^"]*grid-template-columns:[^"]+)">/)
+
+    expect(layout.get('grid-template-columns')).toBe('320px minmax(0,1fr)')
+  })
+
   it('keeps page chrome fixed and scrolls only the active tab pane', () => {
     const markup = renderToStaticMarkup(<JotmoRecordingSurface />)
     const root = matchStyle(markup, /^<div style="([^"]+)"/)
@@ -37,7 +44,7 @@ describe('JotmoRecordingSurface layout', () => {
     expect(pane.get('overscroll-behavior')).toBe('contain')
   })
 
-  it('shows only the date and duration for a recorded calendar day', () => {
+  it('shows the complete calendar duration in compact hours', () => {
     type CalendarCellProps = {
       date: Date
       meta: JotmoRecordingCalendarDay
@@ -54,16 +61,47 @@ describe('JotmoRecordingSurface layout', () => {
 
     const markup = renderToStaticMarkup(<RecordingCalendarCell
       date={new Date(2026, 6, 9)}
-      meta={{ dateStamp: new Date(2026, 6, 9).getTime(), durationMillis: 59 * 60_000, hasRecording: true, unreviewedCount: 1 }}
+      meta={{ dateStamp: new Date(2026, 6, 9).getTime(), durationMillis: 42 * 60_000, hasRecording: true, unreviewedCount: 1 }}
       selected={false}
       isToday={false}
       onClick={() => {}}
     />)
 
     expect(markup).toContain('>9<')
-    expect(markup).toContain('>59分<')
+    expect(markup).toContain('>0.7h<')
+    expect(markup).not.toContain('text-overflow:ellipsis')
     expect(markup).not.toContain('aria-hidden')
     expect(markup).not.toContain('>1</span>')
+  })
+
+  it('reserves fixed rows so dates align whether a duration exists or not', () => {
+    type CalendarCellProps = {
+      date: Date
+      meta: JotmoRecordingCalendarDay
+      selected: boolean
+      isToday: boolean
+      onClick(): void
+    }
+    const RecordingCalendarCell = (recordingSurface as unknown as {
+      RecordingCalendarCell?: ComponentType<CalendarCellProps>
+    }).RecordingCalendarCell
+
+    expect(RecordingCalendarCell).toBeDefined()
+    if (RecordingCalendarCell === undefined) return
+
+    const markup = renderToStaticMarkup(<RecordingCalendarCell
+      date={new Date(2026, 6, 9)}
+      meta={{ dateStamp: new Date(2026, 6, 9).getTime(), durationMillis: 42 * 60_000, hasRecording: true, unreviewedCount: 0 }}
+      selected={false}
+      isToday={false}
+      onClick={() => {}}
+    />)
+    const cell = matchStyle(markup, /^<button[^>]*style="([^"]+)"/)
+
+    expect(cell.get('display')).toBe('grid')
+    expect(cell.get('grid-template-rows')).toBe('24px 12px')
+    expect(cell.get('height')).toBe('54px')
+    expect(markup).toContain('grid-row:1;line-height:24px')
   })
 
   it('shows a stable speaker color dot beside the numeric speaker label', () => {
