@@ -319,6 +319,8 @@ export interface ArkmeRecordingTranscriptItem {
   itemId: string
   sessionId: string
   childId: string
+  asrItemIndex: number
+  transcriptSource: ArkmeAiVideoTranscriptSource
   startAtMillis: number
   endAtMillis: number
   speakerNumber: number
@@ -560,6 +562,7 @@ export interface ArkmeAiVideoPreflightResult {
   selectedDurationMillis: number
   minimumDurationMillis: number
   selectedSegmentCount: number
+  selectedTextCount?: number
   retryable: boolean
   reasonCode?: string
   proof?: string
@@ -573,6 +576,7 @@ export interface ArkmeAiVideoJob {
   stage: string
   progress: number
   selectedSegmentCount: number
+  selectedTextCount?: number
   retryable: boolean
   videoAssetUid?: string
   coverAssetUid?: string

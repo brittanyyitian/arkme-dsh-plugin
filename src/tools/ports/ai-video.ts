@@ -18,4 +18,16 @@ export interface ArkmeAiVideoToolPort {
     signal?: AbortSignal,
   ): Promise<ArkmeAiVideoJob>
   aiVideoStatus(jobId: string, signal?: AbortSignal): Promise<ArkmeAiVideoJob>
+  textAiVideoPreflight(
+    title: string,
+    texts: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ArkmeAiVideoPreflightResult>
+  textAiVideoCreate(
+    clientRequestId: string,
+    title: string,
+    texts: readonly string[],
+    preflightProof: string,
+    signal?: AbortSignal,
+  ): Promise<ArkmeAiVideoJob>
 }

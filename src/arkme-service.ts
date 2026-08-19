@@ -1211,6 +1211,53 @@ export class ArkmeService {
     return this.aiVideoJob(data)
   }
 
+  async textAiVideoPreflight(
+    title: string,
+    texts: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ArkmeAiVideoPreflightResult> {
+    const session = await this.requireSession()
+    const data = await this.authenticatedIntelligentPost<Record<string, unknown>>(
+      '/api/v1/ai-video/text/preflight',
+      { ...(title.trim() === '' ? {} : { title: title.trim() }), texts },
+      session,
+      signal,
+    )
+    return {
+      allowed: booleanValue(data.allowed),
+      message: stringValue(data.message).trim() || 'AI 视频内容检查已完成',
+      selectedDurationMillis: Math.max(0, numberValue(data.selected_duration_millis)),
+      minimumDurationMillis: Math.max(0, numberValue(data.minimum_duration_millis)),
+      selectedSegmentCount: Math.max(0, numberValue(data.selected_segment_count)),
+      selectedTextCount: Math.max(0, numberValue(data.selected_text_count)),
+      retryable: booleanValue(data.retryable),
+      ...(stringValue(data.reason_code).trim() === '' ? {} : { reasonCode: stringValue(data.reason_code).trim() }),
+      ...(stringValue(data.proof).trim() === '' ? {} : { proof: stringValue(data.proof).trim() }),
+    }
+  }
+
+  async textAiVideoCreate(
+    clientRequestId: string,
+    title: string,
+    texts: readonly string[],
+    preflightProof: string,
+    signal?: AbortSignal,
+  ): Promise<ArkmeAiVideoJob> {
+    const session = await this.requireSession()
+    const data = await this.authenticatedIntelligentPost<Record<string, unknown>>(
+      '/api/v1/ai-video/text/jobs/create',
+      {
+        client_request_id: clientRequestId,
+        ...(title.trim() === '' ? {} : { title: title.trim() }),
+        texts,
+        ...(preflightProof.trim() === '' ? {} : { preflight_proof: preflightProof.trim() }),
+      },
+      session,
+      signal,
+    )
+    return this.aiVideoJob(data)
+  }
+
   async checkArkmeIdAvailability(name: string): Promise<ArkmeIdAvailabilitySnapshot> {
     const snapshot = await this.refreshProfile()
     if (snapshot.profile === null) {
@@ -3507,12 +3554,14 @@ export class ArkmeService {
     }
     const selection = objectValue(data.selection)
     const segmentCount = listValue(objectValue(selection).segments).length
+    const textCount = listValue(objectValue(selection).texts).length
     return {
       jobId,
       status: status as ArkmeAiVideoJobStatus,
       stage: stringValue(data.stage).trim() || status,
       progress: Math.min(100, Math.max(0, Math.trunc(numberValue(data.progress)))),
       selectedSegmentCount: segmentCount,
+      ...(textCount === 0 ? {} : { selectedTextCount: textCount }),
       retryable: booleanValue(data.retryable),
       ...(stringValue(data.video_asset_uid).trim() === '' ? {} : { videoAssetUid: stringValue(data.video_asset_uid).trim() }),
       ...(stringValue(data.cover_asset_uid).trim() === '' ? {} : { coverAssetUid: stringValue(data.cover_asset_uid).trim() }),
