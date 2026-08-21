@@ -11,8 +11,6 @@ function sameSource(left: ArkmeSourceItem | undefined, right: ArkmeSourceItem | 
 }
 
 export interface ArkmeUiState {
-  open: boolean
-  surfaceOpen: boolean
   authRevision: number
   chatRevision: number
   mode: 'login' | 'source' | 'recordings' | 'calendar' | 'search' | 'extensions' | 'arko'
@@ -22,7 +20,7 @@ export interface ArkmeUiState {
 }
 
 export class ArkmeUiController {
-  private state: ArkmeUiState = { open: false, surfaceOpen: false, authRevision: 0, chatRevision: 0, mode: 'login' }
+  private state: ArkmeUiState = { authRevision: 0, chatRevision: 0, mode: 'login' }
   private lastConversationSource: ArkmeSourceItem | undefined
   private readonly listeners = new Set<() => void>()
 
@@ -33,27 +31,10 @@ export class ArkmeUiController {
     return () => { this.listeners.delete(listener) }
   }
 
-  open(): void {
-    this.publish({ ...this.state, open: true })
-  }
-
-  activateSurface(): void {
-    this.publish({ ...this.state, open: true, surfaceOpen: true })
-  }
-
-  deactivateSurface(): void {
-    this.publish({ ...this.state, surfaceOpen: false })
-  }
-
   focusSendToSelf(): void {
     this.lastConversationSource = undefined
     const { selectedSource: _selectedSource, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'source' })
-  }
-
-  close(): void {
-    const { extensionShareRef: _extensionShareRef, ...rest } = this.state
-    this.publish({ ...rest, open: false, surfaceOpen: false })
+    this.publish({ ...rest, mode: 'source' })
   }
 
   authChanged(authenticated = false, resetSelection = false): void {
@@ -62,8 +43,6 @@ export class ArkmeUiController {
       const state = resetSelection ? stateWithoutSelection : this.state
       this.publish({
         ...state,
-        open: true,
-        surfaceOpen: true,
         mode: state.mode === 'login' ? 'source' : state.mode,
         authRevision: this.state.authRevision + 1,
       })
@@ -73,8 +52,6 @@ export class ArkmeUiController {
     const { selectedSource: _selectedSource, ...rest } = this.state
     this.publish({
       ...rest,
-      open: false,
-      surfaceOpen: this.state.surfaceOpen,
       mode: 'login',
       authRevision: this.state.authRevision + 1,
     })
@@ -86,45 +63,38 @@ export class ArkmeUiController {
 
   showLogin(): void {
     const { selectedSource: _selectedSource, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'login' })
-  }
-
-  showLoginSurface(): void {
-    const { selectedSource: _selectedSource, ...rest } = this.state
-    this.publish({ ...rest, open: false, surfaceOpen: true, mode: 'login' })
+    this.publish({ ...rest, mode: 'login' })
   }
 
   showRecordings(): void {
     const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'recordings' })
+    this.publish({ ...rest, mode: 'recordings' })
   }
 
   showCalendar(): void {
     const { recordingTarget: _recordingTarget, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'calendar' })
+    this.publish({ ...rest, mode: 'calendar' })
   }
 
   showRecordingTarget(dateStamp: number, startAtMillis: number): void {
     const { selectedSource: _selectedSource, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'recordings', recordingTarget: { dateStamp, startAtMillis } })
+    this.publish({ ...rest, mode: 'recordings', recordingTarget: { dateStamp, startAtMillis } })
   }
 
   showSearch(): void {
     const { selectedSource: _selectedSource, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'search' })
+    this.publish({ ...rest, mode: 'search' })
   }
 
   showExtensions(): void {
     const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'extensions' })
+    this.publish({ ...rest, mode: 'extensions' })
   }
 
   showConversations(): void {
     const { recordingTarget: _recordingTarget, ...rest } = this.state
     this.publish({
       ...rest,
-      open: true,
-      surfaceOpen: true,
       mode: 'source',
       ...(this.lastConversationSource === undefined ? {} : { selectedSource: this.lastConversationSource }),
     })
@@ -132,12 +102,12 @@ export class ArkmeUiController {
 
   showArko(): void {
     const { selectedSource: _selectedSource, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'arko' })
+    this.publish({ ...rest, mode: 'arko' })
   }
 
   openExtensionShare(shareRef: string): void {
     const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
-    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'source', extensionShareRef: shareRef })
+    this.publish({ ...rest, mode: 'source', extensionShareRef: shareRef })
   }
 
   dismissExtensionShare(): void {
@@ -147,12 +117,11 @@ export class ArkmeUiController {
 
   selectSource(source: ArkmeSourceItem): void {
     this.lastConversationSource = source
-    this.publish({ ...this.state, open: true, mode: 'source', selectedSource: source })
+    this.publish({ ...this.state, mode: 'source', selectedSource: source })
   }
 
   private publish(next: ArkmeUiState): void {
-    if (next.open === this.state.open && next.surfaceOpen === this.state.surfaceOpen
-      && next.authRevision === this.state.authRevision
+    if (next.authRevision === this.state.authRevision
       && next.chatRevision === this.state.chatRevision
       && next.mode === this.state.mode
       && next.recordingTarget?.dateStamp === this.state.recordingTarget?.dateStamp
