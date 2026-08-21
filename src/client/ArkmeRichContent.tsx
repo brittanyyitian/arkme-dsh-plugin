@@ -11,7 +11,7 @@ const mediaGap = 5
 
 const styles: Record<string, CSSProperties> = {
   stack: { width: 'max-content', maxWidth: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 },
-  text: { width: 'max-content', maxWidth: '100%', margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word', fontSize: 16, lineHeight: '24px' },
+  text: { width: 'max-content', maxWidth: '100%', margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word', fontSize: 14, lineHeight: '22px' },
   collapsedText: { display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: textCollapseMaxLines },
   textFrame: { position: 'relative', width: '100%', maxWidth: '100%' },
   textFade: { position: 'absolute', right: 0, bottom: 22, left: 0, height: 28, pointerEvents: 'none', background: 'linear-gradient(180deg, rgba(255,255,255,0), var(--arkme-bubble-fade, rgba(238,243,255,.96)))' },
