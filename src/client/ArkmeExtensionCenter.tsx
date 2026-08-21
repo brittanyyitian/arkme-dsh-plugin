@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft } from '@phosphor-icons/react/ArrowLeft'
-import { MagnifyingGlass } from '@phosphor-icons/react/MagnifyingGlass'
-import { Play } from '@phosphor-icons/react/Play'
-import { SpinnerGap } from '@phosphor-icons/react/SpinnerGap'
-import { X } from '@phosphor-icons/react/X'
+import { MagnifyingGlass } from '@phosphor-icons/react/dist/icons/MagnifyingGlass'
 import type {
   ArkmeExtensionCatalogItem, ArkmeExtensionCatalogPage, ArkmeExtensionInstallPreview, ArkmeExtensionInstallTaskSnapshot,
   ArkmeExtensionEnabledResult, ArkmeExtensionPublishResult, ArkmeExtensionUpdateResolution, ArkmeInstalledExtensionView,
+  ArkmeSharedExtensionDetail,
 } from '../extensions/types.js'
+import { ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE } from '../extensions/types.js'
 import type { ArkmeMyExtensionItem, ArkmeMyExtensionPage } from '../extensions/owned-types.js'
 import { ArkmeExtensionIcon } from './ArkmeExtensionIcon.js'
 import { ArkmeExtensionAvatar } from './ArkmeExtensionAvatar.js'
@@ -20,6 +18,7 @@ import {
 } from './extension-edit-flow.js'
 import { ArkmeExtensionReviews, extensionRatingLabel } from './ArkmeExtensionReviews.js'
 import { ArkmeExtensionShareDialog, ArkmeExtensionSourceLink } from './ArkmeExtensionShare.js'
+import { ArkmeSharedExtensionDetail as SharedExtensionDetailView } from './ArkmeSharedExtensionDetail.js'
 import { extensionTabSelection, mergeExtensionDiscoverItems } from './extension-market-model.js'
 import { callArkme } from './api.js'
 import { createArkmeSdk } from '../sdk/index.js'
@@ -30,7 +29,7 @@ import { arkmeTheme } from './arkme-theme.js'
 
 type Tab = 'discover' | 'installed' | 'mine' | 'updates'
 const extensionSdk = createArkmeSdk()
-export const ARKME_EXTENSION_BRAND_GREEN = '#09B83E'
+export const ARKME_EXTENSION_BRAND_GREEN = '#8295E8'
 export const ARKME_EXTENSION_PRIMARY_ACTION_BG = arkmeTheme.primaryAction
 export const ARKME_EXTENSION_PRIMARY_ACTION_FG = arkmeTheme.onPrimaryAction
 export const ARKME_EXTENSION_RESTART_SURFACE = arkmeTheme.menu
@@ -59,9 +58,6 @@ const styles: Record<string, CSSProperties> = {
     boxSizing: 'border-box', background: 'var(--dsw-alias-bg-mask-1, rgba(17, 24, 39, .20))',
     backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)',
   },
-  embeddedBackdrop: {
-    width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden',
-  },
   dialog: {
     position: 'relative',
     width: 'min(860px, calc(100vw - 64px))', height: 'min(680px, calc(100vh - 64px))',
@@ -69,13 +65,37 @@ const styles: Record<string, CSSProperties> = {
     border: `1px solid ${colors.border}`, borderRadius: 18, background: colors.surface,
     boxShadow: '0 28px 80px rgba(20, 24, 31, .22), 0 4px 18px rgba(20, 24, 31, .08)',
   },
+  shell: {
+    width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column',
+    background: colors.surface, color: colors.text, fontFamily: 'var(--dsw-font-family, inherit)',
+  },
+  embeddedFrame: { width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' },
   embeddedDialog: {
     width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden',
     border: 0, borderRadius: 0, background: '#fff', boxShadow: 'none',
   },
-  shell: {
-    width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column',
-    background: colors.surface, color: colors.text, fontFamily: 'var(--dsw-font-family, inherit)',
+  embeddedShell: { overflowY: 'auto', background: '#fff' },
+  embeddedHeader: {
+    width: 'min(980px, calc(100% - 96px))', height: 'auto', minHeight: 0, margin: '0 auto',
+    padding: '38px 0 0', alignItems: 'flex-start', boxSizing: 'border-box',
+  },
+  embeddedHeaderCopy: { flex: 1, minWidth: 0 },
+  eyebrow: { margin: '0 0 8px', color: '#858991', fontSize: 14, lineHeight: '20px' },
+  embeddedTitle: { margin: 0, fontSize: 36, lineHeight: '46px', letterSpacing: '-.04em', fontWeight: 650 },
+  embeddedSubtitle: { display: 'block', marginTop: 12, color: '#7d818b', fontSize: 15, lineHeight: '22px' },
+  mineButton: {
+    height: 38, flex: 'none', marginTop: 7, padding: '0 13px', border: '1px solid #dedfe3',
+    borderRadius: 10, background: '#fff', color: '#242629', cursor: 'pointer', font: 'inherit', fontSize: 12,
+  },
+  search: {
+    width: 'min(980px, calc(100% - 96px))', height: 46, minHeight: 46, margin: '25px auto 0',
+    padding: '0 12px', display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box',
+    border: '1px solid #dedfe3', borderRadius: 10, color: '#858991', background: '#fff',
+  },
+  searchInput: { flex: 1, minWidth: 0, height: '100%', border: 0, outline: 0, background: 'transparent', font: 'inherit', fontSize: 13 },
+  embeddedList: {
+    width: 'min(980px, calc(100% - 96px))', margin: '0 auto', padding: '15px 0 96px',
+    display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14, alignContent: 'start',
   },
   header: {
     height: 58, flex: 'none', display: 'flex', alignItems: 'center', gap: 8,
@@ -117,6 +137,10 @@ const styles: Record<string, CSSProperties> = {
     margin: 0, padding: '11px 8px', border: 0, borderBottom: `1px solid ${colors.border}`, borderRadius: 0,
     background: 'transparent', color: colors.text, textAlign: 'left',
   },
+  cardGrid: {
+    minHeight: 126, padding: 16, border: '1px solid #e2e3e6', borderRadius: 16,
+    background: '#fff', alignItems: 'stretch', boxShadow: '0 5px 18px rgba(25,28,38,.025)',
+  },
   cardButton: { cursor: 'pointer', font: 'inherit' },
   cardPrimary: {
     minWidth: 0, flex: 1, display: 'flex', gap: 10, alignItems: 'flex-start', padding: 0,
@@ -141,6 +165,7 @@ const styles: Record<string, CSSProperties> = {
     width: 18, height: 18, borderRadius: 999, background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,.14)',
     transition: 'transform .15s ease',
   },
+  installSmallGrid: { width: 68, height: 34, alignSelf: 'center', justifyContent: 'center', padding: '0 12px', borderRadius: 10, background: '#17191c', color: '#fff' },
   appIcon: {
     width: 32, height: 32, flex: 'none', display: 'grid', placeItems: 'center', overflow: 'hidden',
     borderRadius: 9, background: colors.subtle, color: colors.secondary,
@@ -157,21 +182,21 @@ const styles: Record<string, CSSProperties> = {
   meta: { display: 'block', marginTop: 2, color: colors.secondary, fontSize: 11, lineHeight: '16px', wordBreak: 'break-word' },
   description: {
     display: '-webkit-box', overflow: 'hidden', marginTop: 4, color: colors.secondary,
-    fontSize: 12, lineHeight: '17px', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
+    fontSize: 12, lineHeight: '17px', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3,
   },
   chips: { display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7 },
   chip: { padding: '1px 6px', borderRadius: 999, background: colors.surface, color: colors.secondary, fontSize: 10, lineHeight: '17px' },
   activeChip: { background: colors.accentSoft, color: colors.accent },
   warningChip: { background: arkmeTheme.warningSoft, color: colors.warning },
-  error: { margin: '0 0 10px', padding: '10px 12px', borderRadius: 10, background: arkmeTheme.dangerSoft, color: colors.danger, fontSize: 12 },
-  installStatus: { margin: '0 0 10px', padding: '10px 12px', borderRadius: 10, background: colors.accentSoft, color: colors.secondary, fontSize: 12 },
-  restartNotice: { margin: '0 0 10px', padding: '10px 12px', borderRadius: 10, background: colors.accentSoft, color: colors.secondary, fontSize: 12 },
-  empty: { display: 'grid', justifyItems: 'center', padding: '46px 18px 24px', textAlign: 'center' },
+  error: { gridColumn: '1 / -1', margin: '0 0 10px', padding: '10px 12px', borderRadius: 10, background: arkmeTheme.dangerSoft, color: colors.danger, fontSize: 12 },
+  installStatus: { gridColumn: '1 / -1', margin: '0 0 10px', padding: '10px 12px', borderRadius: 10, background: colors.accentSoft, color: colors.secondary, fontSize: 12 },
+  restartNotice: { gridColumn: '1 / -1', margin: '0 0 10px', padding: '10px 12px', borderRadius: 10, background: colors.accentSoft, color: colors.secondary, fontSize: 12 },
+  empty: { gridColumn: '1 / -1', display: 'grid', justifyItems: 'center', padding: '46px 18px 24px', textAlign: 'center' },
   emptyIcon: { width: 38, height: 38, display: 'grid', placeItems: 'center', color: colors.caption },
   emptyTitle: { marginTop: 13, color: colors.text, fontSize: 13, fontWeight: 600, lineHeight: '20px' },
   emptyDesc: { maxWidth: 230, marginTop: 4, color: colors.secondary, fontSize: 11, lineHeight: '17px' },
   skeleton: { height: 76, marginBottom: 8, borderRadius: 12, background: colors.subtle, opacity: .72 },
-  detail: { paddingBottom: 20 },
+  detail: { gridColumn: '1 / -1', paddingBottom: 20 },
   detailBack: {
     height: 30, display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 10, padding: '0 6px 0 2px',
     border: 0, borderRadius: 7, background: 'transparent', color: colors.secondary, font: 'inherit', fontSize: 11, cursor: 'pointer',
@@ -221,7 +246,7 @@ const styles: Record<string, CSSProperties> = {
 }
 
 export function ArkmeExtensionRestartDialog({ kind, restarting, onLater, onRestart }: {
-  kind: 'apply' | 'remove'
+  kind: 'apply' | 'remove' | 'unavailable'
   restarting: boolean
   onLater(): void
   onRestart(): void
@@ -229,21 +254,29 @@ export function ArkmeExtensionRestartDialog({ kind, restarting, onLater, onResta
   const disabledStyle: CSSProperties = restarting ? { opacity: .62, cursor: 'default' } : {}
   return <div style={styles.restartOverlay}>
     <section style={styles.restartDialog} role="alertdialog" aria-modal="true" aria-labelledby="arkme-extension-restart-title">
-      <h3 id="arkme-extension-restart-title" style={styles.restartTitle}>需要重启 DSH</h3>
+      <h3 id="arkme-extension-restart-title" style={styles.restartTitle}>{kind === 'unavailable' ? '插件不可用' : '需要重启 DSH'}</h3>
       <p style={styles.restartDescription}>
-        {kind === 'remove'
+        {kind === 'unavailable'
+          ? `${ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE} 请联系插件作者或安装兼容版本后重试。`
+          : kind === 'remove'
           ? '扩展已卸载，重启后会从当前页面完全移除。'
           : '扩展已安装到插件列表，重启后立即生效。'}
       </p>
       <div style={styles.restartActions}>
-        <button type="button" style={{ ...styles.restartLater, ...disabledStyle }} disabled={restarting} onClick={onLater}>稍后</button>
-        <button type="button" style={{ ...styles.restartPrimary, ...disabledStyle }} disabled={restarting} onClick={onRestart}>
-          {restarting ? '正在重启…' : '立即重启'}
-        </button>
+        {kind === 'unavailable'
+          ? <button type="button" style={styles.restartPrimary} onClick={onLater}>知道了</button>
+          : <>
+            <button type="button" style={{ ...styles.restartLater, ...disabledStyle }} disabled={restarting} onClick={onLater}>稍后</button>
+            <button type="button" style={{ ...styles.restartPrimary, ...disabledStyle }} disabled={restarting} onClick={onRestart}>
+              {restarting ? '正在重启…' : '立即重启'}
+            </button>
+          </>}
       </div>
     </section>
   </div>
 }
+
+const PENDING_EXTENSION_RESTART_KEY = 'arkme.extension.pending-restart'
 
 const TAB_LABELS: Record<Tab, string> = { discover: '发现', installed: '已安装', mine: '我的扩展', updates: '更新' }
 const EMPTY_COPY: Record<Tab, { title: string; description: string }> = {
@@ -251,6 +284,14 @@ const EMPTY_COPY: Record<Tab, { title: string; description: string }> = {
   installed: { title: '还没有安装扩展', description: '从发现页选择扩展，或在 DSH 对话中指定 extension_id。' },
   mine: { title: '还没有我的扩展', description: '和 DSH 生成 Cordis 扩展，或把自建 Bundle 加入当前 Profile。' },
   updates: { title: '所有扩展均为最新版本', description: '有新版本或安全撤销时，会在这里提醒你。' },
+}
+
+function BackIcon({ size = 18 }: { size?: number }) {
+  return <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+}
+
+function CloseIcon() {
+  return <svg aria-hidden width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
 }
 
 function Chips({ children }: { children: ReactNode }) { return <div style={styles.chips}>{children}</div> }
@@ -287,7 +328,12 @@ export function ArkmeExtensionManifestDetails({ manifest }: { manifest: unknown 
 }
 
 function LoadingIcon() {
-  return <SpinnerGap aria-hidden size={15} className="arkme-icon-spin" />
+  return <svg aria-hidden width="15" height="15" viewBox="0 0 20 20" fill="none">
+    <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="2" opacity=".22" />
+    <path d="M10 3a7 7 0 0 1 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur=".8s" repeatCount="indefinite" />
+    </path>
+  </svg>
 }
 
 function InstallLoadingButton({ task, onPause, onResume }: {
@@ -303,7 +349,7 @@ function InstallLoadingButton({ task, onPause, onResume }: {
     type="button" style={{ ...styles.loadingButton, ...(action === undefined ? { cursor: 'default' } : {}) }}
     disabled={action === undefined} aria-label={label} title={label} onClick={action}
   >{paused
-      ? <Play aria-hidden size={13} weight="fill" />
+      ? <svg aria-hidden width="13" height="13" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5-7-4.5Z" fill="currentColor" /></svg>
       : <LoadingIcon />}</button>
 }
 
@@ -329,7 +375,7 @@ export function ArkmeExtensionToggle({ item, busy, onChange }: {
   </button>
 }
 
-export function ExtensionCard({ item, installed, actionLabel, status, statusColor, installTask, actionBusy, onClick, onAction, onToggle, onPause, onResume }: {
+export function ExtensionCard({ item, installed, actionLabel, status, statusColor, installTask, actionBusy, grid = false, onClick, onAction, onToggle, onPause, onResume }: {
   item: ArkmeExtensionCatalogItem
   installed?: ArkmeInstalledExtensionView | undefined
   actionLabel?: string | undefined
@@ -337,6 +383,7 @@ export function ExtensionCard({ item, installed, actionLabel, status, statusColo
   statusColor?: string | undefined
   installTask?: ArkmeExtensionInstallTaskSnapshot | undefined
   actionBusy?: boolean
+  grid?: boolean
   onClick(): void
   onAction?: (() => void) | undefined
   onToggle?: ((enabled: boolean) => void) | undefined
@@ -345,8 +392,7 @@ export function ExtensionCard({ item, installed, actionLabel, status, statusColo
 }) {
   const metadata = extensionCardMetadata(item)
   return <div
-    className="arkme-extension-card"
-    style={styles.card}
+    style={{ ...styles.card, ...(grid ? styles.cardGrid : {}) }}
     onMouseEnter={event => { event.currentTarget.style.background = colors.hover }}
     onMouseLeave={event => { event.currentTarget.style.background = 'transparent' }}
   >
@@ -365,7 +411,7 @@ export function ExtensionCard({ item, installed, actionLabel, status, statusColo
     /> : <span style={styles.actionGroup}>
       {actionLabel !== undefined && <button
         type="button"
-        style={{ ...styles.installSmall, ...(onAction === undefined ? { opacity: .45, cursor: 'not-allowed' } : {}) }}
+        style={{ ...styles.installSmall, ...(grid ? styles.installSmallGrid : {}), ...(onAction === undefined ? { opacity: .45, cursor: 'not-allowed' } : {}) }}
         disabled={onAction === undefined || actionBusy === true}
         onClick={onAction}
       >{actionLabel}</button>}
@@ -388,7 +434,6 @@ export function MyExtensionCard({ item, installed, toggleBusy = false, onPublish
   const action = myExtensionPrimaryAction(item)
   const version = displayVersion(item.published?.version ?? item.persisted?.version)
   return <div
-    className="arkme-extension-card"
     style={styles.card}
     onMouseEnter={event => { event.currentTarget.style.background = colors.hover }}
     onMouseLeave={event => { event.currentTarget.style.background = 'transparent' }}
@@ -419,7 +464,7 @@ export function MyExtensionCard({ item, installed, toggleBusy = false, onPublish
 
 function EmptyState({ tab }: { tab: Tab }) {
   const copy = EMPTY_COPY[tab]
-  return <div className="arkme-extension-grid-span" style={styles.empty}>
+  return <div style={styles.empty}>
     <span style={styles.emptyIcon}><ArkmeExtensionIcon size={22} /></span>
     <span style={styles.emptyTitle}>{copy.title}</span>
     <span style={styles.emptyDesc}>{copy.description}</span>
@@ -427,7 +472,7 @@ function EmptyState({ tab }: { tab: Tab }) {
 }
 
 function LoadingState() {
-  return <div className="arkme-extension-grid-span" aria-label="正在加载扩展"><div style={styles.skeleton} /><div style={styles.skeleton} /><div style={styles.skeleton} /></div>
+  return <div aria-label="正在加载扩展"><div style={styles.skeleton} /><div style={styles.skeleton} /><div style={styles.skeleton} /></div>
 }
 
 export function extensionInstallPercent(task: Pick<ArkmeExtensionInstallTaskSnapshot, 'phase' | 'downloadedBytes' | 'totalBytes'>): number {
@@ -567,14 +612,22 @@ function extensionEnabledLabel(item: ArkmeInstalledExtensionView): string {
   return item.active ? '已启用' : '已启用，尚未加载'
 }
 
-export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose, embedded = false }: {
+export function extensionEnableUnavailable(
+  item: ArkmeInstalledExtensionView | undefined,
+  enabled: boolean,
+): boolean {
+  return enabled && item?.unavailable !== undefined
+}
+
+export function ArkmeExtensionCenter({ currentSessionId, currentUserId, shareRef, onShareExit, onClose, embedded = false }: {
   currentSessionId?: string | undefined
   currentUserId?: number | undefined
+  shareRef?: string | undefined
+  onShareExit?(): void
   onClose(): void
-  embedded?: boolean
+  embedded?: boolean | undefined
 }) {
   const [tab, setTab] = useState<Tab>('discover')
-  const [searchQuery, setSearchQuery] = useState('')
   const [discoverItems, setDiscoverItems] = useState<ArkmeExtensionCatalogItem[]>([])
   const [publishedItems, setPublishedItems] = useState<ArkmeExtensionCatalogItem[]>([])
   const [discoverOwnerWarning, setDiscoverOwnerWarning] = useState('')
@@ -583,14 +636,15 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
   const [installed, setInstalled] = useState<ArkmeInstalledExtensionView[]>([])
   const [updates, setUpdates] = useState<ArkmeExtensionUpdateResolution[]>([])
   const [detail, setDetail] = useState<ArkmeExtensionCatalogItem>()
-  const [loadingTab, setLoadingTab] = useState<Tab | undefined>('discover')
+  const [loadingTab, setLoadingTab] = useState<Tab | undefined>(shareRef === undefined ? 'discover' : undefined)
   const [detailBusy, setDetailBusy] = useState(false)
   const [installTask, setInstallTask] = useState<ArkmeExtensionInstallTaskSnapshot>()
   const [actionBusyExtensionId, setActionBusyExtensionId] = useState<string>()
   const [installError, setInstallError] = useState('')
   const [restartNotice, setRestartNotice] = useState('')
-  const [restartPrompt, setRestartPrompt] = useState<{ extensionId: string; kind: 'apply' | 'remove' }>()
+  const [restartPrompt, setRestartPrompt] = useState<{ extensionId: string; kind: 'apply' | 'remove' | 'unavailable' }>()
   const [uninstallConfirmExtensionId, setUninstallConfirmExtensionId] = useState<string>()
+  const [query, setQuery] = useState('')
   const [restarting, setRestarting] = useState(false)
   const [publishItem, setPublishItem] = useState<ArkmeMyExtensionItem>()
   const [publishBusy, setPublishBusy] = useState(false)
@@ -600,6 +654,8 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
   const [editError, setEditError] = useState('')
   const [shareDialogExtensionId, setShareDialogExtensionId] = useState<string>()
   const [shareNotice, setShareNotice] = useState('')
+  const [sharedDetail, setSharedDetail] = useState<ArkmeSharedExtensionDetail>()
+  const [sharedDetailBusy, setSharedDetailBusy] = useState(false)
   const [loadedTabs, setLoadedTabs] = useState<ReadonlySet<Tab>>(new Set())
   const [error, setError] = useState('')
   const requestSequence = useRef(0)
@@ -610,6 +666,21 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
   const hostInstance = async (): Promise<string | undefined> => {
     try { return (await callArkme<{ instanceId: string }>('provider.instance')).instanceId }
     catch { return undefined }
+  }
+
+  const acceptInstalled = (local: ArkmeInstalledExtensionView[]): void => {
+    setInstalled(local)
+    if (typeof window === 'undefined') return
+    let pendingExtensionId: string | null = null
+    try { pendingExtensionId = window.sessionStorage.getItem(PENDING_EXTENSION_RESTART_KEY) } catch { return }
+    if (pendingExtensionId === null || pendingExtensionId === '') return
+    const pending = local.find(item => item.extensionId === pendingExtensionId)
+    if (pending?.unavailable !== undefined) {
+      setRestartPrompt({ extensionId: pendingExtensionId, kind: 'unavailable' })
+      try { window.sessionStorage.removeItem(PENDING_EXTENSION_RESTART_KEY) } catch { /* Best-effort UI marker cleanup. */ }
+    } else if (pending?.active === true) {
+      try { window.sessionStorage.removeItem(PENDING_EXTENSION_RESTART_KEY) } catch { /* Best-effort UI marker cleanup. */ }
+    }
   }
 
   const reloadAfterRestart = async (previous: string | undefined): Promise<void> => {
@@ -646,7 +717,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
             .catch(() => ({ value: { items: [], total: 0 }, failed: true as const })),
         ])
         if (sequence === requestSequence.current) {
-          setDiscoverItems(page.items); setInstalled(local); setPublishedItems(owned.value.items)
+          setDiscoverItems(page.items); acceptInstalled(local); setPublishedItems(owned.value.items)
           setDiscoverOwnerWarning(owned.failed ? '你的私有扩展暂未加载，请稍后刷新。' : '')
         }
       } else if (target === 'mine') {
@@ -657,7 +728,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
           callArkme<ArkmeInstalledExtensionView[]>('extensions.installed-list', undefined, controller.signal),
         ])
         if (sequence === requestSequence.current) {
-          setMyExtensions(page.items); setMyExtensionWarnings(page.warnings); setInstalled(local)
+          setMyExtensions(page.items); setMyExtensionWarnings(page.warnings); acceptInstalled(local)
         }
       } else if (target === 'installed') {
         const [local, catalog, owned] = await Promise.all([
@@ -668,7 +739,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
             .catch(() => ({ items: [], total: 0 })),
         ])
         if (sequence === requestSequence.current) {
-          setInstalled(local); setDiscoverItems(catalog.items); setPublishedItems(owned.items)
+          acceptInstalled(local); setDiscoverItems(catalog.items); setPublishedItems(owned.items)
         }
       } else {
         const [local, available, catalog, owned] = await Promise.all([
@@ -680,7 +751,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
             .catch(() => ({ items: [], total: 0 })),
         ])
         if (sequence === requestSequence.current) {
-          setInstalled(local); setUpdates(available); setDiscoverItems(catalog.items); setPublishedItems(owned.items)
+          acceptInstalled(local); setUpdates(available); setDiscoverItems(catalog.items); setPublishedItems(owned.items)
         }
       }
       if (sequence === requestSequence.current) setLoadedTabs(current => new Set(current).add(target))
@@ -696,11 +767,26 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
   }
 
   useEffect(() => {
+    if (shareRef !== undefined) return
     void load('discover', 'initial')
     return () => { requestController.current?.abort() }
-  }, [])
+  }, [shareRef])
+
+  useEffect(() => {
+    if (shareRef === undefined) return
+    const controller = new AbortController()
+    setSharedDetail(undefined); setSharedDetailBusy(true); setDetail(undefined); setError('')
+    void callArkme<ArkmeSharedExtensionDetail>('extensions.share.detail', { shareRef }, controller.signal)
+      .then(value => { setSharedDetail(value) })
+      .catch(caught => {
+        if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : String(caught))
+      })
+      .finally(() => { if (!controller.signal.aborted) setSharedDetailBusy(false) })
+    return () => { controller.abort() }
+  }, [shareRef])
 
   const switchTab = (target: Tab) => {
+    if (shareRef !== undefined) { setSharedDetail(undefined); onShareExit?.() }
     const selection = extensionTabSelection(tab, target, loadedTabs)
     if (selection.changed) {
       setTab(target); setError(''); setDetail(undefined); setInstallError(''); setInstallTask(undefined); setUninstallConfirmExtensionId(undefined)
@@ -831,13 +917,27 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
 
   const toggleEnabled = async (extensionId: string, enabled: boolean) => {
     setActionBusyExtensionId(extensionId); setInstallError(''); setRestartNotice('')
+    if (extensionEnableUnavailable(installed.find(item => item.extensionId === extensionId), enabled)) {
+      setRestartPrompt({ extensionId, kind: 'unavailable' })
+      setActionBusyExtensionId(undefined)
+      return
+    }
     try {
       const result = await callArkme<ArkmeExtensionEnabledResult>('extensions.enabled.set', { extensionId, enabled })
       setInstalled(current => current.map(item => {
         if (item.extensionId !== extensionId) return item
-        return { ...item, enabled: result.enabled, active: result.active }
+        const { unavailable: _unavailable, ...retained } = item
+        return {
+          ...retained,
+          enabled: result.enabled,
+          active: result.active,
+          ...(result.unavailable === undefined ? {} : { unavailable: result.unavailable }),
+        }
       }))
-      setRestartNotice(result.message)
+      if (result.unavailable !== undefined) {
+        setRestartNotice('')
+        setRestartPrompt({ extensionId, kind: 'unavailable' })
+      } else setRestartNotice(result.message)
     } catch (caught) {
       setInstallError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -865,7 +965,11 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
           }
           if (next.phase !== 'failed' || next.result?.installed === true) {
             const local = await callArkme<ArkmeInstalledExtensionView[]>('extensions.installed-list', undefined, controller.signal)
-            setInstalled(local)
+            acceptInstalled(local)
+            if (local.find(item => item.extensionId === next.extensionId)?.unavailable !== undefined) {
+              setRestartNotice('')
+              setRestartPrompt({ extensionId: next.extensionId, kind: 'unavailable' })
+            }
             setLoadedTabs(current => {
               const updated = new Set(current).add('installed')
               updated.delete('updates')
@@ -886,14 +990,20 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
   }, [installTask?.taskId])
 
   const restartNow = async () => {
-    if (restartPrompt === undefined || restarting) return
+    if (restartPrompt === undefined || restartPrompt.kind === 'unavailable' || restarting) return
     setRestarting(true); setInstallError('')
     const previous = await hostInstance()
+    if (restartPrompt.kind === 'apply' && typeof window !== 'undefined') {
+      try { window.sessionStorage.setItem(PENDING_EXTENSION_RESTART_KEY, restartPrompt.extensionId) } catch { /* Reload fallback remains manual. */ }
+    }
     try {
       await callArkme('extensions.restart', { extensionId: restartPrompt.extensionId })
       setRestartNotice('DSH 正在重启，完成后页面会自动刷新。')
       await reloadAfterRestart(previous)
     } catch (caught) {
+      if (restartPrompt.kind === 'apply' && typeof window !== 'undefined') {
+        try { window.sessionStorage.removeItem(PENDING_EXTENSION_RESTART_KEY) } catch { /* Best-effort UI marker cleanup. */ }
+      }
       setRestarting(false)
       setInstallError(caught instanceof Error ? caught.message : String(caught))
     }
@@ -990,27 +1100,21 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
   }
 
   const updateCount = updates.filter(item => item.update_available || item.revoked).length
-  const searchNeedle = searchQuery.trim().toLocaleLowerCase('zh-CN')
-  const matchesSearch = (name: string, description = '') => searchNeedle === ''
-    || `${name}\n${description}`.toLocaleLowerCase('zh-CN').includes(searchNeedle)
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const matchesQuery = (name: string, description: string) => normalizedQuery === ''
+    || name.toLocaleLowerCase().includes(normalizedQuery)
+    || description.toLocaleLowerCase().includes(normalizedQuery)
   const visibleItems = mergeExtensionDiscoverItems(discoverItems, publishedItems)
-    .filter(item => matchesSearch(item.name, item.description))
-  const visibleInstalled = installed.filter(item => {
-    const catalog = installedExtensionCatalogItem(item)
-    return matchesSearch(catalog.name, catalog.description)
-  })
-  const visibleMine = myExtensions.filter(item => matchesSearch(item.name, item.description))
+    .filter(item => matchesQuery(item.name, item.description))
+  const visibleInstalled = installed.filter(item => matchesQuery(item.manifest.name, item.manifest.description))
   const visibleUpdates = updates.filter(item => {
     const local = installed.find(installedItem => installedItem.extensionId === item.extension_id)
-    const catalog = local === undefined
-      ? { name: item.extension_id, description: '' }
-      : installedExtensionCatalogItem(local)
-    return matchesSearch(catalog.name, catalog.description)
+    return matchesQuery(local?.manifest.name ?? item.extension_id, local?.manifest.description ?? '')
   })
   const iconRefFor = (extensionId: string): string | undefined => discoverItems.find(item => item.extension_id === extensionId)?.icon_ref
     ?? publishedItems.find(item => item.extension_id === extensionId)?.icon_ref
     ?? myExtensions.find(item => item.published?.extensionId === extensionId)?.published?.iconRef
-  const busy = loadingTab === tab || detailBusy
+  const busy = loadingTab === tab || detailBusy || sharedDetailBusy
   const detailInstalled = detail === undefined ? undefined : installed.find(item => item.extensionId === detail.extension_id)
   const detailUpdate = detail === undefined ? undefined : updates.find(item => item.extension_id === detail.extension_id)
   const detailInstallAction = detail === undefined
@@ -1031,7 +1135,6 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
           : undefined
 
   useEffect(() => {
-    if (embedded) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (shareDialogExtensionId !== undefined) { setShareDialogExtensionId(undefined); setShareNotice('') }
@@ -1042,11 +1145,10 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
     }
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('keydown', onKeyDown) }
-  }, [editBusy, editItem, embedded, onClose, publishBusy, publishItem, restartPrompt, restarting, shareDialogExtensionId])
+  }, [editBusy, editItem, onClose, publishBusy, publishItem, restartPrompt, restarting, shareDialogExtensionId])
 
   const dialog = <div
-    className={embedded ? 'arkme-extension-center-embedded' : undefined}
-    style={embedded ? styles.embeddedBackdrop : styles.backdrop}
+    style={embedded ? styles.embeddedFrame : styles.backdrop}
     onMouseDown={event => { if (!embedded && event.target === event.currentTarget) onClose() }}
   >
   <section
@@ -1055,8 +1157,18 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
     aria-modal={embedded ? undefined : true}
     aria-labelledby="arkme-extension-center-title"
   >
-  <div style={styles.shell} aria-label="Arkme 扩展市场">
-    <header style={styles.header}>
+  <div style={{ ...styles.shell, ...(embedded ? styles.embeddedShell : {}) }} aria-label="Arkme 扩展市场">
+    <header style={{ ...styles.header, ...(embedded ? styles.embeddedHeader : {}) }}>
+      {embedded ? <>
+        <div style={styles.embeddedHeaderCopy}>
+          <p style={styles.eyebrow}>插件</p>
+          <h1 id="arkme-extension-center-title" style={styles.embeddedTitle}>扩展 Arkme 的能力</h1>
+          <span style={styles.embeddedSubtitle}>安装后直接告诉 Arkme 你想完成什么。</span>
+        </div>
+        <button type="button" style={styles.mineButton} onClick={() => { switchTab(tab === 'installed' ? 'discover' : 'installed') }}>
+          {tab === 'installed' ? '发现插件' : '我的插件'}
+        </button>
+      </> : <>
       <h2 id="arkme-extension-center-title" style={styles.title}>扩展市场</h2>
       {detail?.share !== undefined && <button
         type="button"
@@ -1064,26 +1176,18 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
         aria-haspopup="dialog"
         onClick={() => { setShareNotice(''); setShareDialogExtensionId(detail.extension_id) }}
       >分享</button>}
-      {!embedded && <button
+      <button
         type="button" style={styles.iconButton} aria-label="关闭扩展市场" title="关闭"
         onClick={onClose}
         onMouseEnter={event => { event.currentTarget.style.background = colors.hover }}
         onMouseLeave={event => { event.currentTarget.style.background = 'transparent' }}
-      ><X size={15} /></button>}
+      ><CloseIcon /></button></>}
     </header>
-    {embedded && <div className="arkme-extension-toolbar">
-      <label>
-        <MagnifyingGlass size={18} />
-        <input
-          value={searchQuery}
-          onChange={event => { setSearchQuery(event.target.value) }}
-          placeholder="搜索插件"
-          aria-label="搜索插件"
-        />
-      </label>
-      <button type="button" onClick={() => { switchTab('mine') }}>我的插件</button>
-    </div>}
-    <nav style={styles.tabs} role="tablist" aria-label="扩展市场分类">
+    {embedded && <label style={styles.search}>
+      <MagnifyingGlass size={16} aria-hidden />
+      <input style={styles.searchInput} value={query} placeholder="搜索插件" aria-label="搜索插件" onChange={event => { setQuery(event.target.value) }} />
+    </label>}
+    {!embedded && <nav style={styles.tabs} role="tablist" aria-label="扩展市场分类">
       {(Object.keys(TAB_LABELS) as Tab[]).map(value => <button
         key={value} type="button" role="tab" aria-selected={tab === value}
         style={{ ...styles.tab, ...(tab === value ? styles.activeTab : {}) }}
@@ -1094,8 +1198,8 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
           {value === 'updates' && updateCount > 0 && <span style={styles.count}>{updateCount}</span>}
         </span>
       </button>)}
-    </nav>
-    <main style={styles.list}>
+    </nav>}
+    <main style={{ ...styles.list, ...(embedded ? styles.embeddedList : {}) }}>
       {error !== '' && <div style={styles.error}>{error}</div>}
       {installError !== '' && <div style={styles.error}>{installError}</div>}
       {installTask !== undefined && !installTask.done && <div style={styles.installStatus} role="status">
@@ -1110,11 +1214,16 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
       {tab === 'mine' && myExtensionWarningText(myExtensionWarnings) !== ''
         && <div style={styles.restartNotice} role="status">{myExtensionWarningText(myExtensionWarnings)}</div>}
       {busy && <LoadingState />}
-      {!busy && error === '' && detail !== undefined && <div style={styles.detail}>
+      {!busy && error === '' && sharedDetail !== undefined && shareRef !== undefined && <SharedExtensionDetailView
+        shareRef={shareRef}
+        extension={sharedDetail}
+        onBack={() => { setSharedDetail(undefined); onShareExit?.() }}
+      />}
+      {!busy && error === '' && sharedDetail === undefined && detail !== undefined && <div style={styles.detail}>
         <button type="button" style={styles.detailBack} onClick={() => {
           setDetail(undefined); setInstallTask(undefined); setInstallError(''); setUninstallConfirmExtensionId(undefined)
           setShareDialogExtensionId(undefined); setShareNotice('')
-        }}><ArrowLeft size={14} />返回列表</button>
+        }}><BackIcon size={14} />返回列表</button>
         <div style={styles.detailHero}>
           <ArkmeExtensionAvatar extensionId={detail.extension_id} iconRef={detail.icon_ref} size={46} fallbackColor={colors.accent} />
           <div style={styles.cardBody}>
@@ -1180,13 +1289,14 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
             onClick={() => { setUninstallConfirmExtensionId(detail.extension_id) }}
           >卸载扩展</button>)}
       </div>}
-      {!busy && error === '' && detail === undefined && tab === 'discover' && <>
+      {!busy && error === '' && sharedDetail === undefined && detail === undefined && tab === 'discover' && <>
         {visibleItems.map(item => {
           const local = installed.find(installedItem => installedItem.extensionId === item.extension_id)
           const action = extensionCatalogAction(item, local?.installedVersion)
           return <ExtensionCard
             key={item.extension_id}
             item={item}
+            grid={embedded}
             {...(local === undefined || action.label === '更新' ? { actionLabel: action.label } : {})}
             {...(local === undefined ? {} : { installed: local })}
             installTask={installTask?.extensionId === item.extension_id ? installTask : undefined}
@@ -1202,8 +1312,8 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
         })}
         {visibleItems.length === 0 && <EmptyState tab={tab} />}
       </>}
-      {!busy && error === '' && detail === undefined && tab === 'mine' && <>
-        {visibleMine.map(item => {
+      {!busy && error === '' && sharedDetail === undefined && detail === undefined && tab === 'mine' && <>
+        {myExtensions.map(item => {
           const extensionId = item.published?.extensionId
           const local = extensionId === undefined ? undefined : installed.find(candidate => candidate.extensionId === extensionId)
           return <MyExtensionCard
@@ -1237,20 +1347,23 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
 			}}
           />
         })}
-        {visibleMine.length === 0 && <EmptyState tab="mine" />}
+        {myExtensions.length === 0 && <EmptyState tab="mine" />}
       </>}
-      {!busy && error === '' && tab === 'installed' && <>
+      {!busy && error === '' && sharedDetail === undefined && detail === undefined && tab === 'installed' && <>
         {visibleInstalled.map(item => <ExtensionCard
           key={item.extensionId}
           item={installedExtensionCatalogItem(item, iconRefFor(item.extensionId))}
           installed={item}
+          grid={embedded}
+          status={item.active ? '已加载' : '已安装，尚未加载'}
+          statusColor={item.active ? colors.accent : colors.warning}
           actionBusy={actionBusyExtensionId === item.extensionId}
           onClick={() => { void inspect(item.extensionId) }}
           onToggle={enabled => { void toggleEnabled(item.extensionId, enabled) }}
         />)}
         {visibleInstalled.length === 0 && <EmptyState tab="installed" />}
       </>}
-      {!busy && error === '' && tab === 'updates' && <>
+      {!busy && error === '' && sharedDetail === undefined && detail === undefined && tab === 'updates' && <>
         {visibleUpdates.map(item => {
           const local = installed.find(installedItem => installedItem.extensionId === item.extension_id)
           const catalogItem = local === undefined
@@ -1261,6 +1374,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose,
           return <ExtensionCard
             key={item.extension_id}
             item={catalogItem}
+            grid={embedded}
             {...(local === undefined ? {} : { installed: local })}
             {...(item.update_available && !item.revoked ? { actionLabel: '更新' } : {})}
             {...(updateStatus === undefined ? {} : { status: updateStatus, statusColor: colors.danger })}

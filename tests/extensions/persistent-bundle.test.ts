@@ -1,11 +1,15 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { packArkmeExtension } from '../../src/extensions/artifact.js'
 import { renderPersistentClientBundle } from '../../src/extensions/persistent-client-bundle.js'
-import { materializePersistentExtensionBundle } from '../../src/extensions/persistent-bundle.js'
+import {
+  materializePersistentExtensionBundle, quarantinePersistentExtension,
+  readPersistentExtensionActivation, writePersistentExtensionActivation,
+} from '../../src/extensions/persistent-bundle.js'
 import {
   ArkmeExtensionProfileInstaller,
   profilePluginCommandErrorDetail,
@@ -59,6 +63,54 @@ describe('persistent extension profile bundle', () => {
     expect(client.helper()).toBe(42)
   })
 
+  it('disposes a mounted stale Client when the Host rejects its runtime version', async () => {
+    const requests: Array<{ operation: string; params: Record<string, unknown> }> = []
+    const fetchImpl = vi.fn(async (_input: string, init: { body?: string }) => {
+      const request = JSON.parse(init.body ?? '{}') as { operation: string; params: Record<string, unknown> }
+      requests.push(request)
+      if (request.operation === 'extensions.persistent.client-state') {
+        return { ok: true, status: 200, json: async () => ({ ok: true, value: { mount: true } }) }
+      }
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({
+          ok: false,
+          error: { code: 'extension-runtime-unavailable', message: '插件不可用，请重启 DSH 后重试' },
+        }),
+      }
+    })
+    const rendered = renderPersistentClientBundle('@example/stale-client', {
+      extensionId: 'ext_stale', version: '1.0.0', name: 'Stale Client',
+      code: 'return { apply() { return host.call("read").catch(() => undefined) } }',
+      apiPath: '/arkme-self/api',
+    })
+    let loaded: { factory: (requireModule: (id: string) => unknown) => unknown } | undefined
+    runInNewContext(rendered, {
+      window: { __ModuleLoader__: { load: (entry: typeof loaded) => { loaded = entry } } },
+      document: { createElement: vi.fn(), head: { append: vi.fn() } },
+      fetch: fetchImpl,
+      console,
+    })
+    const dispose = vi.fn(async () => undefined)
+    const childContext = { fiber: { inject: {} }, get: vi.fn(() => undefined) }
+    const outerContext = {
+      effect: vi.fn(),
+      plugin: vi.fn((plugin: { apply(ctx: unknown): unknown }) => Object.assign(
+        Promise.resolve(plugin.apply(childContext)),
+        { dispose },
+      )),
+    }
+
+    await (loaded!.factory(() => ({})) as { apply(ctx: unknown): Promise<void> }).apply(outerContext)
+
+    expect(requests).toEqual([
+      { operation: 'extensions.persistent.client-state', params: { extensionId: 'ext_stale', version: '1.0.0' } },
+      { operation: 'extensions.persistent.invoke', params: { extensionId: 'ext_stale', version: '1.0.0', method: 'read', args: null } },
+    ])
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
   it('materializes one immutable DSH bundle with Host and Client wrappers', () => {
     const { root, artifact, artifactPath } = fixture()
     const result = materializePersistentExtensionBundle({
@@ -83,10 +135,65 @@ describe('persistent extension profile bundle', () => {
     expect(readFileSync(join(result.bundleDirectory, 'cordis.patch.yml'), 'utf8')).toContain(manifest.name)
     expect(readFileSync(join(result.bundleDirectory, 'lib', 'index.js'), 'utf8')).toContain('applyPersistentArkmeHostExtension')
     expect(readFileSync(join(result.bundleDirectory, 'lib', 'client.js'), 'utf8')).toContain('extensions.persistent.invoke')
-    expect(readFileSync(join(result.bundleDirectory, 'lib', 'client.js'), 'utf8')).toContain('extensions.enabled-state')
+    expect(readFileSync(join(result.bundleDirectory, 'lib', 'client.js'), 'utf8')).toContain('extensions.persistent.client-state')
+    expect(readFileSync(join(result.bundleDirectory, 'lib', 'client.js'), 'utf8')).toContain('version: spec.version')
     expect(JSON.parse(readFileSync(join(result.bundleDirectory, 'activation.json'), 'utf8'))).toEqual({
       schema_version: 1, extension_id: 'ext_test', enabled: true,
     })
+  })
+
+  it('persists runtime quarantine atomically and clears it only on an explicit enable', () => {
+    const { root, artifact, artifactPath } = fixture()
+    const result = materializePersistentExtensionBundle({
+      profileDirectory: root,
+      artifactPath,
+      trustedPublicKey: 'public-key',
+      clientCode: 'return { apply() {} }',
+      resolution: {
+        extension_id: 'ext_quarantine', version: '1.0.0', artifact_url: 'https://objects.test/a',
+        artifact_size: artifact.bytes.byteLength, artifact_sha256: artifact.artifactSha256,
+        manifest_sha256: artifact.manifestSha256, manifest: artifact.manifest,
+        signature: 'signature', signing_key_id: 'key-1', published_at: 1_787_000_000_000, revoked: false,
+      },
+    })
+    const installationUrl = pathToFileURL(result.installationPath)
+
+    quarantinePersistentExtension(result.bundleDirectory, 'ext_quarantine', new Error('BROKEN_HOST'), 123)
+    expect(readPersistentExtensionActivation(installationUrl)).toEqual({
+      schema_version: 1,
+      extension_id: 'ext_quarantine',
+      enabled: false,
+      quarantine: { code: 'runtime-load-failed', failed_at_millis: 123, message: 'BROKEN_HOST' },
+    })
+
+    writePersistentExtensionActivation(result.bundleDirectory, 'ext_quarantine', true)
+    expect(readPersistentExtensionActivation(installationUrl)).toEqual({
+      schema_version: 1, extension_id: 'ext_quarantine', enabled: true,
+    })
+  })
+
+  it('regenerates a legacy Client wrapper that cannot verify its installed version', () => {
+    const { root, artifact, artifactPath } = fixture()
+    const input = {
+      profileDirectory: root,
+      artifactPath,
+      trustedPublicKey: 'public-key',
+      clientCode: 'return { apply() {} }',
+      resolution: {
+        extension_id: 'ext_wrapper_upgrade', version: '1.0.0', artifact_url: 'https://objects.test/a',
+        artifact_size: artifact.bytes.byteLength, artifact_sha256: artifact.artifactSha256,
+        manifest_sha256: artifact.manifestSha256, manifest: artifact.manifest,
+        signature: 'signature', signing_key_id: 'key-1', published_at: 1_787_000_000_000, revoked: false,
+      },
+    }
+    const first = materializePersistentExtensionBundle(input)
+    writeFileSync(join(first.bundleDirectory, 'lib', 'client.js'), 'extensions.persistent.invoke')
+
+    const regenerated = materializePersistentExtensionBundle(input)
+
+    expect(regenerated.bundleDirectory).toBe(first.bundleDirectory)
+    expect(readFileSync(join(regenerated.bundleDirectory, 'lib', 'client.js'), 'utf8'))
+      .toContain('extensions.persistent.client-state')
   })
 
   it('keeps an installed dependency while toggling its public Profile bundle layer', async () => {

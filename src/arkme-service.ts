@@ -25,6 +25,7 @@ import { ArkoService } from './services/arko-service.js'
 import { ArrangementService } from './services/arrangement-service.js'
 import { AuthService } from './services/auth-service.js'
 import { BotService, type ArkmeBotRefPayload } from './services/bot-service.js'
+import { CalendarService } from './services/calendar-service.js'
 import { ChatRealtimeService } from './services/chat-realtime-service.js'
 import { ChatService } from './services/chat-service.js'
 import { CommunityService } from './services/community-service.js'
@@ -91,6 +92,8 @@ import type {
   ArkmeArrangementReminderWriteResult,
   ArkmeAuthSnapshot,
   ArkmeBotList,
+  ArkmeCalendarBucketPage,
+  ArkmeCalendarDayRecordPage,
   ArkmeCachedQueryResult,
   ArkmeCachedSnapshot,
   ArkmeCaptchaResult,
@@ -112,6 +115,8 @@ import type {
   ArkmeIdAvailabilitySnapshot,
   ArkmeIdMutationResult,
   ArkmeImageBytes,
+  ArkmeImageSearchItem,
+  ArkmeImageSearchResult,
   ArkmeInterwovenBootstrap,
   ArkmeInterwovenDetail,
   ArkmeLongArticleDetail,
@@ -162,6 +167,8 @@ import type {
   ArkmeWechatMoneyFlowPage,
   ArkmeWechatPhonePage,
   ArkmeWorldFeedPage,
+  ArkmeWorldVoiceprintAvailability,
+  ArkmeWorldVoiceprintPlaybackChunk,
   ArkmeWorldInteractionCreateResult,
   ArkmeWorldInteractionPage,
   ArkmeWorldPublishResult,
@@ -180,6 +187,7 @@ export class ArkmeService {
   private readonly runtime: ServiceRuntime
   private readonly aiVideo: AiVideoService
   private readonly arrangement: ArrangementService
+  private readonly calendar: CalendarService
   private readonly wechat: WechatService
   private readonly recording: RecordingService
   private readonly profile: ProfileService
@@ -212,6 +220,7 @@ export class ArkmeService {
     this.runtime = new ServiceRuntime(config, sessionStore, stateStore, fetchImpl, pendingSessionStore)
     this.aiVideo = new AiVideoService(this.runtime)
     this.arrangement = new ArrangementService(this.runtime)
+    this.calendar = new CalendarService(this.runtime)
     this.wechat = new WechatService(this.runtime)
     this.recording = new RecordingService(this.runtime)
     this.profile = new ProfileService(this.runtime)
@@ -231,7 +240,7 @@ export class ArkmeService {
       recordItem: raw => this.recordItem(raw),
     })
     this.record = new RecordService(this.runtime, this.media, this.source)
-    this.search = new SearchService(this.runtime, this.record)
+    this.search = new SearchService(this.runtime, this.record, this.media)
     this.bot = new BotService(this.runtime, this.source)
     this.outgoingCall = new OutgoingCallService(this.runtime, this.source, this.profile, outgoingCallBroker)
     this.world = new WorldService(
@@ -301,7 +310,11 @@ export class ArkmeService {
   private async refreshChatSessionProjectionBatch(
     pending: Array<[string, number]>,
   ): Promise<Array<[string, number]>> {
-    return await this.realtime.refreshChatSessionProjectionBatch(pending)
+    const failed = await this.realtime.refreshChatSessionProjectionBatch(pending.map(([uid, latestSequence]) => [uid, {
+      latestSequence,
+      notificationHints: [],
+    }]))
+    return failed.map(([uid, projection]) => [uid, projection.latestSequence])
   }
 
   attachOpenClawProvisioner(provisioner: ReturnType<typeof createOpenClawProvisioner>): void {
@@ -387,6 +400,8 @@ export class ArkmeService {
         revisionPolling: true,
         userProfile: true,
         imageRead: true,
+        recordCalendar: true,
+        imageLibrary: true,
         sourceDirectory: true,
         sourceTimeline: true,
         sourceTextSend: true,
@@ -404,6 +419,7 @@ export class ArkmeService {
         extensionPreviews: true,
         worldFeed: true,
         worldInteractions: true,
+        worldVoiceprintPlayback: true,
         arrangements: true,
         myExtensions: true,
         extensionPublish: true,
@@ -1093,6 +1109,18 @@ export class ArkmeService {
     return await this.search.searchScene(options)
   }
 
+  /**
+   * Build the desktop image library from the owner's mixed image/video scene.
+   * Signed storage URLs stay inside the Provider and are replaced by account-bound media refs.
+   */
+  async searchImages(options: {
+    limit: number
+    cursor?: string
+    signal?: AbortSignal
+  }): Promise<ArkmeImageSearchResult> {
+    return await this.search.searchImages(options)
+  }
+
   async searchRecordings(options: {
     query: string
     limit: number
@@ -1112,6 +1140,24 @@ export class ArkmeService {
 
   async list(limit: number, cursor?: ArkmeRecordCursor): Promise<ArkmeSelfRecordList> {
     return await this.record.list(limit, cursor)
+  }
+
+  async calendarBuckets(
+    options: { startDate: string; endDate: string; timezone?: string; signal?: AbortSignal },
+  ): Promise<ArkmeCalendarBucketPage> {
+    return await this.calendar.bucketPage(options)
+  }
+
+  async calendarRecords(
+    options: {
+      bucketDate: string
+      timezone?: string
+      limit?: number
+      cursor?: ArkmeRecordCursor
+      signal?: AbortSignal
+    },
+  ): Promise<ArkmeCalendarDayRecordPage> {
+    return await this.calendar.dayRecords(options)
   }
 
   async listWorldRecords(
@@ -1181,6 +1227,21 @@ export class ArkmeService {
     options: { limit?: number; offset?: number; signal?: AbortSignal } = {},
   ): Promise<ArkmeWorldFeedPage> {
     return await this.world.listWorldFeed(options)
+  }
+
+  async worldVoiceprintPlaybackAvailability(
+    recordRefs: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ArkmeWorldVoiceprintAvailability> {
+    return await this.world.worldVoiceprintPlaybackAvailability(recordRefs, signal)
+  }
+
+  async generateWorldVoiceprintPlayback(input: {
+    recordRef: string
+    chunkIndex?: number
+    signal?: AbortSignal
+  }): Promise<ArkmeWorldVoiceprintPlaybackChunk> {
+    return await this.world.generateWorldVoiceprintPlayback(input)
   }
 
   /** Read the authenticated comment/reply tree behind one account-bound World reference. */

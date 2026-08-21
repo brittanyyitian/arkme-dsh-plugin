@@ -367,6 +367,20 @@ export async function dispatchArkmeHostOperation(
       numberParam(params, 'toStamp', 0),
     )
     case 'recordings.day': return await service.recordingDay(numberParam(params, 'dateStamp', 0))
+    case 'calendar.buckets': return await service.calendarBuckets({
+      startDate: stringParam(params, 'startDate'),
+      endDate: stringParam(params, 'endDate'),
+      ...(stringParam(params, 'timezone') === '' ? {} : { timezone: stringParam(params, 'timezone') }),
+    })
+    case 'calendar.records': {
+      const cursor = cursorParam(params)
+      return await service.calendarRecords({
+        bucketDate: stringParam(params, 'bucketDate'),
+        limit: numberParam(params, 'limit', 20),
+        ...(stringParam(params, 'timezone') === '' ? {} : { timezone: stringParam(params, 'timezone') }),
+        ...(cursor === undefined ? {} : { cursor }),
+      })
+    }
     case 'search.records': return await service.searchRemote({
       query: stringParam(params, 'query'),
       limit: numberParam(params, 'limit', 20),
@@ -376,11 +390,16 @@ export async function dispatchArkmeHostOperation(
         : {}),
       ...(stringParam(params, 'sourceUid') === '' ? {} : { sourceUid: stringParam(params, 'sourceUid') }),
     })
-    case 'search.scene': return await service.searchScene({
-      scene: stringParam(params, 'scene') as ArkmeSearchSceneKind,
+    case 'images.list': return await service.searchImages({
       limit: numberParam(params, 'limit', 20),
       ...(stringParam(params, 'cursor') === '' ? {} : { cursor: stringParam(params, 'cursor') }),
     })
+    case 'search.scene': {
+      const scene = stringParam(params, 'scene') as ArkmeSearchSceneKind
+      const limit = numberParam(params, 'limit', 20)
+      const cursor = stringParam(params, 'cursor')
+      return await service.searchScene({ scene, limit, ...(cursor === '' ? {} : { cursor }) })
+    }
     case 'search.recordings': return await service.searchRecordings({
       query: stringParam(params, 'query'),
       limit: numberParam(params, 'limit', 20),
@@ -492,6 +511,13 @@ export async function dispatchArkmeHostOperation(
     case 'world.feed': return await service.listWorldFeed({
       limit: Math.min(20, Math.max(1, Math.trunc(numberParam(params, 'limit', 20)))),
       offset: Math.max(0, Math.trunc(numberParam(params, 'offset', 0))),
+    })
+    case 'world.voiceprint.availability': return await service.worldVoiceprintPlaybackAvailability(
+      [...new Set(stringListParam(params, 'recordRefs').map(value => value.trim()).filter(value => value !== ''))].slice(0, 20),
+    )
+    case 'world.voiceprint.playback.generate': return await service.generateWorldVoiceprintPlayback({
+      recordRef: stringParam(params, 'recordRef').trim(),
+      chunkIndex: Math.min(333, Math.max(0, Math.trunc(numberParam(params, 'chunkIndex', 0)))),
     })
     case 'world.interactions.list': return await service.listWorldInteractions(
       stringParam(params, 'recordRef'),
@@ -724,6 +750,9 @@ export async function dispatchArkmeHostOperation(
 		extensionId: stringParam(params, 'extensionId'),
 		clientMutationId: stringParam(params, 'clientMutationId'),
 	})
+	case 'extensions.share.detail': return await requireExtensionManager(extensionManager).readSharedDetail(
+		stringParam(params, 'shareRef'),
+	)
     case 'extensions.delete': return await requireExtensionManager(extensionManager).delete(
       stringParam(params, 'extensionId'),
     )
@@ -788,11 +817,19 @@ export async function dispatchArkmeHostOperation(
     case 'extensions.restart': return await requireExtensionInstallTasks(extensionInstallTasks).restart(
       stringParam(params, 'extensionId'),
     )
-    case 'extensions.persistent.invoke': return await invokePersistentArkmeExtension(
+    case 'extensions.persistent.client-state': return requireExtensionManager(extensionManager).persistentClientState(
       stringParam(params, 'extensionId'),
-      stringParam(params, 'method'),
-      params.args,
+      stringParam(params, 'version'),
     )
+    case 'extensions.persistent.invoke': {
+      const extensionId = stringParam(params, 'extensionId')
+      const version = stringParam(params, 'version')
+      const state = requireExtensionManager(extensionManager).persistentClientState(extensionId, version)
+      if (!state.mount) {
+        throw new ArkmePluginError('extension-runtime-unavailable', '插件不可用，请重启 DSH 后重试', false, 409)
+      }
+      return await invokePersistentArkmeExtension(extensionId, stringParam(params, 'method'), params.args)
+    }
     case 'extensions.bundle.invoke': return await invokeArkmeBundle(
       stringParam(params, 'packageName'),
       stringParam(params, 'method'),

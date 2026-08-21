@@ -10,11 +10,15 @@ import type {
   ArkmeArrangementReminderToggleResult,
   ArkmeArrangementReminderWriteResult,
   ArkmeAuthSnapshot,
+  ArkmeCalendarBucketPage,
+  ArkmeCalendarDayRecordPage,
+  ArkmeCalendarRecordCursor,
   ArkmeCachedQueryResult,
   ArkmeCachedSnapshot,
   ArkmeContentBlock,
   ArkmeCreateTextResult,
   ArkmeImagePayload,
+  ArkmeImageSearchResult,
   ArkmeLongArticleDetail,
   ArkmeLongArticleDraft,
   ArkmePendingWrite,
@@ -36,6 +40,8 @@ import type {
   ArkmeUserProfileSnapshot,
   ArkmeUploadedAsset,
   ArkmeWorldFeedPage,
+  ArkmeWorldVoiceprintAvailability,
+  ArkmeWorldVoiceprintPlaybackChunk,
   ArkmeWorldInteractionCreateResult,
   ArkmeWorldInteractionPage,
 } from '../types.js'
@@ -50,6 +56,7 @@ import type {
   ArkmeExtensionReviewPage,
   ArkmeExtensionRatingSummary,
 	ArkmeExtensionShare,
+	ArkmeSharedExtensionDetail,
 	ArkmeExtensionSource,
 } from '../extensions/types.js'
 import type { ArkmeMyExtensionPage, ArkmeMyExtensionPublishInput } from '../extensions/owned-types.js'
@@ -70,6 +77,11 @@ export type {
   ArkmeArrangementReminderWriteResult,
   ArkmeArrangementStatus,
   ArkmeAuthSnapshot,
+  ArkmeCalendarBucketDay,
+  ArkmeCalendarBucketPage,
+  ArkmeCalendarDayRecordPage,
+  ArkmeCalendarRecordCursor,
+  ArkmeCalendarRecordItem,
   ArkmeCachedQueryResult,
   ArkmeCachedSnapshot,
   ArkmeContentBlock,
@@ -80,6 +92,8 @@ export type {
   ArkmeGroupAvatarSlot,
   ArkmeImageMediaType,
   ArkmeImagePayload,
+  ArkmeImageSearchItem,
+  ArkmeImageSearchResult,
   ArkmeLongArticleDetail,
   ArkmeLongArticleDraft,
   ArkmePendingWrite,
@@ -113,6 +127,9 @@ export type {
   ArkmeWorldInteractionItem,
   ArkmeWorldInteractionPage,
   ArkmeWorldFeedPage,
+  ArkmeWorldVoiceprintAvailability,
+  ArkmeWorldVoiceprintAvailabilityItem,
+  ArkmeWorldVoiceprintPlaybackChunk,
   ArkmeSelfRecordItem,
   ArkmeSelfRecordList,
   ArkmeSelfSummary,
@@ -126,6 +143,7 @@ export type {
   ArkmeExtensionEnabledState,
   ArkmeExtensionIconMediaType,
   ArkmeExtensionIconResult,
+  ArkmeExtensionUnavailableView,
   ArkmeExtensionMetadataUpdateInput,
   ArkmeExtensionPreviewGallery,
   ArkmeExtensionPreviewItem,
@@ -139,8 +157,10 @@ export type {
   ArkmeExtensionReviewPage,
 	ArkmeExtensionPublishResult,
 	ArkmeExtensionShare,
+	ArkmeSharedExtensionDetail,
 	ArkmeExtensionSource,
 } from '../extensions/types.js'
+export { ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE } from '../extensions/types.js'
 export { ARKME_PROVIDER_CONTRACT_VERSION } from '../types.js'
 export type {
   ArkmeOutgoingCallFailureCode,
@@ -166,6 +186,12 @@ export interface ArkmeSearchOptions {
   limit?: number
   beforeMillis?: number
   syncAll?: boolean
+}
+
+export interface ArkmeImageListOptions {
+  limit?: number
+  cursor?: string
+  signal?: AbortSignal
 }
 
 export interface ArkmeSubscribeOptions {
@@ -414,6 +440,14 @@ export class ArkmeSdk {
 		}, signal)
 	}
 
+	async extensionShareDetail(shareRef: string, signal?: AbortSignal): Promise<ArkmeSharedExtensionDetail> {
+		const normalized = shareRef.trim()
+		if (!/^extshare_[0-9a-f]{32}$/.test(normalized)) {
+			throw new TypeError('Arkme extension share reference is invalid')
+		}
+		return await this.call<ArkmeSharedExtensionDetail>('extensions.share.detail', { shareRef: normalized }, signal)
+	}
+
   /** Read one current-user Arkme image through the authenticated Provider without exposing a signed OSS URL. */
   async readImage(imageRef: string, signal?: AbortSignal): Promise<ArkmeImagePayload> {
     if (imageRef.trim() === '') throw new TypeError('Arkme image reference must not be empty')
@@ -433,6 +467,30 @@ export class ArkmeSdk {
       ...(options.limit === undefined ? {} : { limit: options.limit }),
       ...(options.offset === undefined ? {} : { offset: options.offset }),
     }, options.signal)
+  }
+
+  async worldVoiceprintPlaybackAvailability(
+    recordRefs: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ArkmeWorldVoiceprintAvailability> {
+    const normalized = [...new Set(recordRefs.map(value => value.trim()).filter(value => value !== ''))]
+    if (normalized.length === 0) return { items: [] }
+    return await this.call<ArkmeWorldVoiceprintAvailability>(
+      'world.voiceprint.availability',
+      { recordRefs: normalized.slice(0, 20) },
+      signal,
+    )
+  }
+
+  async generateWorldVoiceprintPlayback(
+    input: { recordRef: string; chunkIndex?: number },
+    signal?: AbortSignal,
+  ): Promise<ArkmeWorldVoiceprintPlaybackChunk> {
+    if (input.recordRef.trim() === '') throw new TypeError('Arkme World record reference must not be empty')
+    return await this.call<ArkmeWorldVoiceprintPlaybackChunk>('world.voiceprint.playback.generate', {
+      recordRef: input.recordRef,
+      ...(input.chunkIndex === undefined ? {} : { chunkIndex: input.chunkIndex }),
+    }, signal)
   }
 
   /** Read comments and replies for one Provider-issued World record reference. */
@@ -745,12 +803,48 @@ export class ArkmeSdk {
     )
   }
 
+  async calendarBuckets(options: {
+    startDate: string
+    endDate: string
+    timezone?: string
+    signal?: AbortSignal
+  }): Promise<ArkmeCalendarBucketPage> {
+    return await this.call<ArkmeCalendarBucketPage>('calendar.buckets', {
+      startDate: options.startDate,
+      endDate: options.endDate,
+      ...(options.timezone === undefined ? {} : { timezone: options.timezone }),
+    }, options.signal)
+  }
+
+  async calendarRecords(options: {
+    bucketDate: string
+    timezone?: string
+    limit?: number
+    cursor?: ArkmeCalendarRecordCursor
+    signal?: AbortSignal
+  }): Promise<ArkmeCalendarDayRecordPage> {
+    return await this.call<ArkmeCalendarDayRecordPage>('calendar.records', {
+      bucketDate: options.bucketDate,
+      ...(options.timezone === undefined ? {} : { timezone: options.timezone }),
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
+      ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+    }, options.signal)
+  }
+
   async search(query: string, options: ArkmeSearchOptions & { signal?: AbortSignal } = {}): Promise<ArkmeCachedQueryResult> {
     return await this.call<ArkmeCachedQueryResult>('records.search', {
       query,
       ...(options.limit === undefined ? {} : { limit: options.limit }),
       ...(options.beforeMillis === undefined ? {} : { beforeMillis: options.beforeMillis }),
       ...(options.syncAll === undefined ? {} : { syncAll: options.syncAll }),
+    }, options.signal)
+  }
+
+  /** List the signed-in user's image library without exposing storage URLs. */
+  async images(options: ArkmeImageListOptions = {}): Promise<ArkmeImageSearchResult> {
+    return await this.call<ArkmeImageSearchResult>('images.list', {
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
+      ...(options.cursor?.trim() ? { cursor: options.cursor.trim() } : {}),
     }, options.signal)
   }
 

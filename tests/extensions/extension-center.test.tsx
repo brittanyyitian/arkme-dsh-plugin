@@ -7,6 +7,7 @@ import {
   ARKME_EXTENSION_RESTART_SURFACE, ArkmeExtensionCenter, ArkmeExtensionRestartDialog,
   ArkmeExtensionToggle, ExtensionCard,
   extensionAuthorLabel, extensionCardMetadata, extensionCatalogAction, extensionDirectInstallTarget,
+  extensionEnableUnavailable,
   extensionInstallFailureMessage, extensionInstallOwnerId, extensionInstallPercent, extensionTabLoadMode, extensionUpdateCardStatus,
   extensionVersionLabel, installedExtensionCatalogItem,
   extensionNativeInstallWarning, formatExtensionBytes, MyExtensionCard,
@@ -67,11 +68,11 @@ describe('Arkme extension market UI', () => {
     expect(html).toContain('我的扩展')
     expect(html).not.toContain('我的发布')
     expect(html).toContain('aria-selected="true"')
-    expect(html).toContain('var(--dsw-alias-state-success-primary, #09b83e)')
-    expect(ARKME_EXTENSION_BRAND_GREEN).toBe('#09B83E')
+    expect(html).toContain('var(--dsw-alias-state-business-primary, #8295e8)')
+    expect(ARKME_EXTENSION_BRAND_GREEN).toBe('#8295E8')
     expect(html).toContain('height:40px')
     expect(html).not.toContain('border-bottom:1px solid')
-    expect(html).toContain('border-bottom:2px solid var(--dsw-alias-state-success-primary, #09b83e)')
+    expect(html).toContain('border-bottom:2px solid var(--dsw-alias-state-business-primary, #8295e8)')
     expect(html.match(/border-bottom:2px solid/g)).toHaveLength(1)
     expect(html).not.toContain('border-bottom:2px solid transparent')
     expect(html).not.toContain('width:28%')
@@ -207,6 +208,9 @@ describe('Arkme extension market UI', () => {
     const restarting = renderToStaticMarkup(<ArkmeExtensionRestartDialog
       kind="apply" restarting onLater={() => {}} onRestart={() => {}}
     />)
+    const unavailable = renderToStaticMarkup(<ArkmeExtensionRestartDialog
+      kind="unavailable" restarting={false} onLater={() => {}} onRestart={() => {}}
+    />)
 
     expect(ARKME_EXTENSION_RESTART_SURFACE).toContain('--dsw-specific-menu')
     expect(ready).toContain('role="alertdialog"')
@@ -219,6 +223,22 @@ describe('Arkme extension market UI', () => {
     expect(restarting).toContain('正在重启…')
     expect(restarting).toContain('opacity:0.62')
     expect(restarting.match(/disabled=""/g)).toHaveLength(2)
+    expect(unavailable).toContain('插件不可用')
+    expect(unavailable).toContain('插件运行失败，已自动停用。')
+    expect(unavailable).toContain('知道了')
+    expect(unavailable).not.toContain('需要重启 DSH')
+    expect(unavailable).not.toContain('立即重启')
+    expect(unavailable).not.toContain('harness.defineTool')
+  })
+
+  it('opens the unavailable dialog instead of retrying restart for a quarantined extension', () => {
+    expect(extensionEnableUnavailable({ unavailable: {
+      code: 'runtime-load-failed', message: '插件运行失败，已自动停用。',
+    } } as never, true)).toBe(true)
+    expect(extensionEnableUnavailable({ unavailable: {
+      code: 'runtime-load-failed', message: '插件运行失败，已自动停用。',
+    } } as never, false)).toBe(false)
+    expect(extensionEnableUnavailable(undefined, true)).toBe(false)
   })
 
   it('renders only the version in catalog card metadata', () => {

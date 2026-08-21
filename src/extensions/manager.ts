@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { ArkmePluginError } from '../arkme-service.js'
 import { ARKME_PROVIDER_CONTRACT_VERSION } from '../types.js'
 import { canonicalExtensionJson, sha256Hex, unpackArkmeExtension } from './artifact.js'
@@ -11,10 +12,13 @@ import { arkmeBundleActive, deactivateArkmeBundle } from './bundle-runtime.js'
 import { ArkmeExtensionInstallStore } from './install-store.js'
 import { ExtensionPublishClient } from './publish-client.js'
 import { normalizeGitHubRepositoryURL } from './source.js'
-import { materializePersistentExtensionBundle, writePersistentExtensionActivation } from './persistent-bundle.js'
+import {
+  materializePersistentExtensionBundle, readPersistentExtensionActivation, writePersistentExtensionActivation,
+} from './persistent-bundle.js'
 import type { ArkmeExtensionProfileInstaller } from './profile-installer.js'
 import {
-  activatePersistentArkmeExtension, deactivatePersistentArkmeExtension, persistentArkmeExtensionActive,
+  activatePersistentArkmeExtension, deactivatePersistentArkmeExtension,
+  persistentArkmeExtensionRuntimeState, type PersistentArkmeExtensionRuntimeState,
 } from './persistent-runtime.js'
 import { verifyBundleResolutionSignature, verifyExtensionResolutionSignature } from './signature.js'
 export { verifyExtensionResolutionSignature } from './signature.js'
@@ -25,11 +29,13 @@ import {
   type ArkmeExtensionIconResult, type ArkmeExtensionInstallPreview, type ArkmeExtensionInstallResolution,
   type ArkmeExtensionPublishResult,
 	type ArkmeExtensionShare,
+	type ArkmeExtensionRatingSummary, type ArkmeExtensionSource, type ArkmeSharedExtensionDetail,
   ARKME_EXTENSION_PREVIEW_MAX_BYTES, ARKME_EXTENSION_PREVIEW_MAX_ITEMS,
   type ArkmeExtensionPreviewBytes, type ArkmeExtensionPreviewGallery, type ArkmeExtensionPreviewMediaType,
   type ArkmeExtensionEditableVisibility, type ArkmeExtensionUpdateResolution, type ArkmeExtensionVisibility,
   type ArkmeExtensionInstallProgress, type ArkmeInstalledExtension, type ArkmeInstalledExtensionView, type DynamicCordisPackageInspectionLike,
   type DynamicCordisRunnerLike,
+  ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE, type ArkmeExtensionUnavailableView,
 } from './types.js'
 
 interface AgentLike { id?: unknown }
@@ -50,6 +56,14 @@ export interface ArkmeExtensionManagerOptions {
   profileInstaller?: Pick<ArkmeExtensionProfileInstaller, 'install' | 'installTarball' | 'remove' | 'restart' | 'setEnabled'>
   clientApiPath?: string
   pluginInventory?: ArkmePluginInventoryLike
+  persistentRuntimeState?: (extensionId: string) => PersistentArkmeExtensionRuntimeState | undefined
+}
+
+export interface ArkmePersistentClientState {
+  extension_id: string
+  version: string
+  mount: boolean
+  reason?: 'not-installed' | 'version-mismatch' | 'runtime-mismatch' | 'disabled' | 'unavailable'
 }
 
 export interface ArkmePluginInventoryLike {
@@ -125,7 +139,10 @@ function requireBundleUploadSlots(session: import('./types.js').ArkmeBundlePubli
   return { bundle: session.bundle_upload, source: session.source_upload }
 }
 
-function installedView(item: ArkmeInstalledExtension): ArkmeInstalledExtensionView {
+function installedView(
+  item: ArkmeInstalledExtension,
+  unavailable?: ArkmeExtensionUnavailableView,
+): ArkmeInstalledExtensionView {
   return {
     extensionId: item.extensionId,
     installedVersion: item.installedVersion,
@@ -136,6 +153,7 @@ function installedView(item: ArkmeInstalledExtension): ArkmeInstalledExtensionVi
     updateChannel: item.updateChannel,
     installedAtMillis: item.installedAtMillis,
     lastCheckedAtMillis: item.lastCheckedAtMillis,
+    ...(unavailable === undefined ? {} : { unavailable }),
   }
 }
 
@@ -163,6 +181,80 @@ function requiredPreviewRef(value: string): string {
     throw new ArkmePluginError('extension-preview-ref-invalid', '扩展预览图引用无效', false, 400)
   }
   return normalized
+}
+
+function requiredShareRef(value: string): string {
+	const normalized = value.trim()
+	if (!/^extshare_[0-9a-f]{32}$/.test(normalized)) {
+		throw new ArkmePluginError('extension-share-invalid', '扩展分享参数无效', false, 400)
+	}
+	return normalized
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+	return value !== null && typeof value === 'object' && !Array.isArray(value)
+		? value as Record<string, unknown>
+		: undefined
+}
+
+function sharedRatingSummary(value: unknown): ArkmeExtensionRatingSummary | undefined {
+	const summary = objectValue(value)
+	const histogram = summary?.histogram
+	if (typeof summary?.average !== 'number' || !Number.isFinite(summary.average)
+		|| summary.average < 0 || summary.average > 5
+		|| typeof summary.count !== 'number' || !Number.isSafeInteger(summary.count) || summary.count < 0
+		|| !Array.isArray(histogram) || histogram.length !== 5
+		|| !histogram.every(item => typeof item === 'number' && Number.isSafeInteger(item) && item >= 0)
+		|| histogram.reduce((total, item) => total + item, 0) !== summary.count
+		|| (summary.count === 0 ? summary.average !== 0 : summary.average <= 0)) return undefined
+	return { average: summary.average, count: summary.count, histogram: histogram as [number, number, number, number, number] }
+}
+
+function sharedSource(value: unknown): ArkmeExtensionSource | undefined {
+	if (value === undefined || value === null) return undefined
+	const source = objectValue(value)
+	if (source?.type !== 'github_repository' || source.verification !== 'publisher_attested'
+		|| source.label !== '开源来源 · GitHub' || typeof source.url !== 'string') return undefined
+	let normalized: string | undefined
+	try { normalized = normalizeGitHubRepositoryURL(source.url) } catch { return undefined }
+	return normalized === source.url
+		? { type: 'github_repository', url: normalized, label: '开源来源 · GitHub', verification: 'publisher_attested' }
+		: undefined
+}
+
+function assertSharedExtensionDetail(value: unknown): ArkmeSharedExtensionDetail {
+	const item = objectValue(value)
+	const previews = item?.preview_images
+	const rating = sharedRatingSummary(item?.rating_summary)
+	if (typeof item?.name !== 'string' || item.name.trim() === '' || [...item.name].length > 120
+		|| typeof item.description !== 'string' || [...item.description].length > 2_000
+		|| (item.visibility !== 'private' && item.visibility !== 'public')
+		|| item.share_scope !== 'link_readonly'
+		|| typeof item.latest_stable_version !== 'string' || semverParts(item.latest_stable_version) === undefined
+		|| (item.icon_ref !== undefined && (typeof item.icon_ref !== 'string' || !/^icon_v1_[a-f0-9]{64}$/.test(item.icon_ref)))
+		|| !Array.isArray(previews) || previews.length > ARKME_EXTENSION_PREVIEW_MAX_ITEMS || rating === undefined) {
+		throw new ArkmePluginError('extension-share-contract-invalid', '扩展市场返回了无效只读分享详情', false, 502)
+	}
+	const safePreviews = previews.map((value) => {
+		const preview = objectValue(value)
+		if (typeof preview?.preview_ref !== 'string' || !/^preview_v1_[a-f0-9]{64}$/.test(preview.preview_ref)
+			|| typeof preview.width !== 'number' || !Number.isSafeInteger(preview.width) || preview.width < 320 || preview.width > 4096
+			|| typeof preview.height !== 'number' || !Number.isSafeInteger(preview.height) || preview.height < 320 || preview.height > 4096) {
+			throw new ArkmePluginError('extension-share-contract-invalid', '扩展市场返回了无效只读分享详情', false, 502)
+		}
+		return { preview_ref: preview.preview_ref, width: preview.width, height: preview.height }
+	})
+	const source = sharedSource(item.source)
+	if (item.source !== undefined && source === undefined) {
+		throw new ArkmePluginError('extension-share-contract-invalid', '扩展市场返回了无效只读分享详情', false, 502)
+	}
+	return {
+		name: item.name.trim(), description: item.description, visibility: item.visibility,
+		share_scope: 'link_readonly', latest_stable_version: item.latest_stable_version,
+		...(typeof item.icon_ref === 'string' ? { icon_ref: item.icon_ref } : {}),
+		preview_images: safePreviews, rating_summary: rating,
+		...(source === undefined ? {} : { source }),
+	}
 }
 
 function assertPreviewGallery(value: ArkmeExtensionPreviewGallery, extensionId: string): ArkmeExtensionPreviewGallery {
@@ -470,6 +562,11 @@ export class ArkmeExtensionManager {
 		return share
 	}
 
+	async readSharedDetail(shareRef: string, signal?: AbortSignal): Promise<ArkmeSharedExtensionDetail> {
+		const response = await this.client.sharedDetail(requiredShareRef(shareRef), signal)
+		return assertSharedExtensionDetail(response.extension)
+	}
+
   async delete(extensionId: string, signal?: AbortSignal): Promise<ArkmeExtensionDeleteResult> {
     return await this.client.deleteExtension(requiredId(extensionId, 'extension_id'), signal)
   }
@@ -667,13 +764,58 @@ export class ArkmeExtensionManager {
   listInstalled(): ArkmeInstalledExtensionView[] {
     const loaderEntries = this.options.pluginInventory?.list().entries ?? []
     return this.store.list().map(item => {
-      const loaderActive = item.profilePackageName !== undefined && loaderEntries.some(entry =>
-        entry.moduleName === item.profilePackageName && entry.enabled && entry.fiberPhase === 'active')
-      const active = loaderActive || item.active || (item.executionModel === 'arkme-sandboxed' && item.profilePackageName !== undefined
-        ? arkmeBundleActive(item.profilePackageName)
-        : persistentArkmeExtensionActive(item.extensionId))
-      return installedView({ ...item, active })
+      const state = this.effectivePersistentActivation(item)
+      const effective = state.item
+      if (effective.enabled !== item.enabled || effective.active !== item.active || effective.lastError !== item.lastError) {
+        this.store.put(effective)
+      }
+      const loaderActive = effective.executionModel !== undefined && effective.profilePackageName !== undefined && loaderEntries.some(entry =>
+        entry.moduleName === effective.profilePackageName && entry.enabled && entry.fiberPhase === 'active')
+      const active = effective.executionModel === undefined
+        ? effective.enabled && this.persistentRuntimeMatches(effective)
+        : loaderActive || effective.active || (effective.executionModel === 'arkme-sandboxed'
+          && effective.profilePackageName !== undefined && arkmeBundleActive(effective.profilePackageName))
+      return installedView({ ...effective, active }, state.unavailable)
     })
+  }
+
+  private persistentRuntimeMatches(item: ArkmeInstalledExtension): boolean {
+    if (item.executionModel !== undefined || item.profileBundlePath === undefined) return false
+    const bundleDirectory = this.resolveLegacyBundlePath(item.profileBundlePath)
+    if (bundleDirectory === undefined) return false
+    const runtime = (this.options.persistentRuntimeState ?? persistentArkmeExtensionRuntimeState)(item.extensionId)
+    return runtime?.active === true
+      && runtime.version === item.installedVersion
+      && runtime.installationUrl === pathToFileURL(join(bundleDirectory, 'installation.json')).href
+  }
+
+  private effectivePersistentActivation(item: ArkmeInstalledExtension): {
+    item: ArkmeInstalledExtension
+    unavailable?: ArkmeExtensionUnavailableView
+  } {
+    if (item.executionModel !== undefined || item.profileBundlePath === undefined) return { item }
+    const bundleDirectory = this.resolveLegacyBundlePath(item.profileBundlePath)
+    if (bundleDirectory === undefined) return { item }
+    try {
+      const activation = readPersistentExtensionActivation(pathToFileURL(join(bundleDirectory, 'installation.json')))
+      if (activation.extension_id !== item.extensionId || activation.enabled) return { item }
+      return {
+        item: {
+          ...item,
+          enabled: false,
+          active: false,
+          ...(activation.quarantine === undefined ? {} : { lastError: activation.quarantine.message }),
+        },
+        ...(activation.quarantine === undefined ? {} : {
+          unavailable: {
+            code: 'runtime-load-failed',
+            message: ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE,
+          },
+        }),
+      }
+    } catch {
+      return { item }
+    }
   }
 
   enabledState(extensionIdValue: string): ArkmeExtensionEnabledState {
@@ -683,9 +825,29 @@ export class ArkmeExtensionManager {
     return {
       extension_id: extensionId,
       installed: true,
-      enabled: installed.enabled,
+      enabled: installed.enabled && (this.store.get(extensionId)?.executionModel !== undefined || installed.active),
       active: installed.active,
+      ...(installed.unavailable === undefined ? {} : { unavailable: installed.unavailable }),
     }
+  }
+
+  persistentClientState(extensionIdValue: string, versionValue: string): ArkmePersistentClientState {
+    const extensionId = requiredId(extensionIdValue, 'extension_id')
+    const version = versionValue.trim()
+    const stored = this.store.get(extensionId)
+    if (stored === undefined) return { extension_id: extensionId, version, mount: false, reason: 'not-installed' }
+    if (version === '' || stored.installedVersion !== version) {
+      return { extension_id: extensionId, version, mount: false, reason: 'version-mismatch' }
+    }
+    const installed = this.listInstalled().find(item => item.extensionId === extensionId)
+    if (installed?.unavailable !== undefined) {
+      return { extension_id: extensionId, version, mount: false, reason: 'unavailable' }
+    }
+    if (installed?.enabled !== true) return { extension_id: extensionId, version, mount: false, reason: 'disabled' }
+    if (installed.active !== true || !this.persistentRuntimeMatches(stored)) {
+      return { extension_id: extensionId, version, mount: false, reason: 'runtime-mismatch' }
+    }
+    return { extension_id: extensionId, version, mount: true }
   }
 
   async setEnabled(input: { agent: unknown; extensionId: string; enabled: boolean }): Promise<ArkmeExtensionEnabledResult> {
@@ -705,7 +867,7 @@ export class ArkmeExtensionManager {
     }
     const current = this.listInstalled().find(item => item.extensionId === extensionId)
     const currentActive = current?.active === true
-    if (installed.enabled === input.enabled) {
+    if ((current?.enabled ?? installed.enabled) === input.enabled) {
       const restartRequired = input.enabled
         ? !currentActive
         : installed.manifest.halves.client && installed.profilePackageName !== undefined
@@ -718,6 +880,7 @@ export class ArkmeExtensionManager {
         message: input.enabled
           ? currentActive ? '扩展已启用' : '扩展已设为启用，重启 DSH 后生效'
           : restartRequired ? '扩展已关闭，重启 DSH 后 Client 界面完全移除' : '扩展已关闭',
+        ...(current?.unavailable === undefined ? {} : { unavailable: current.unavailable }),
       }
     }
 
@@ -806,25 +969,34 @@ export class ArkmeExtensionManager {
         activationError = error instanceof Error ? error.message : String(error)
       }
     }
-    const restartRequired = !active || installed.manifest.halves.client
+    const activationFailed = activationError !== ''
+    const restartRequired = activationFailed ? false : !active || installed.manifest.halves.client
     const { lastError: _lastError, ...retained } = installed
     this.store.put({
       ...retained,
-      enabled: true,
+      enabled: !activationFailed,
       active,
       ...(activationError === '' ? {} : { lastError: activationError }),
     })
     return {
       extension_id: extensionId,
       installed: true,
-      enabled: true,
+      enabled: !activationFailed,
       active,
       restart_required: restartRequired,
-      message: restartRequired
+      message: activationFailed
+        ? `${ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE} 请检查扩展兼容性后重试。`
+        : restartRequired
         ? activationError === ''
           ? '扩展已设为启用，重启 DSH 后完全生效'
           : `扩展已设为启用，当前进程加载失败：${activationError}；可重启 DSH 重试`
         : '扩展已启用，无需重启 DSH',
+      ...(activationFailed ? {
+        unavailable: {
+          code: 'runtime-load-failed' as const,
+          message: ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE,
+        },
+      } : {}),
     }
   }
 

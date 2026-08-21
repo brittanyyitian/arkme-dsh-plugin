@@ -15,13 +15,15 @@ export interface ArkmeUiState {
   surfaceOpen: boolean
   authRevision: number
   chatRevision: number
-  mode: 'login' | 'source' | 'recordings' | 'search' | 'arko'
+  mode: 'login' | 'source' | 'recordings' | 'calendar' | 'search' | 'extensions' | 'arko'
   selectedSource?: ArkmeSourceItem
   recordingTarget?: { dateStamp: number; startAtMillis: number }
+  extensionShareRef?: string
 }
 
 export class ArkmeUiController {
   private state: ArkmeUiState = { open: false, surfaceOpen: false, authRevision: 0, chatRevision: 0, mode: 'login' }
+  private lastConversationSource: ArkmeSourceItem | undefined
   private readonly listeners = new Set<() => void>()
 
   readonly getSnapshot = (): ArkmeUiState => this.state
@@ -44,12 +46,14 @@ export class ArkmeUiController {
   }
 
   focusSendToSelf(): void {
+    this.lastConversationSource = undefined
     const { selectedSource: _selectedSource, ...rest } = this.state
     this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'source' })
   }
 
   close(): void {
-    this.publish({ ...this.state, open: false, surfaceOpen: false })
+    const { extensionShareRef: _extensionShareRef, ...rest } = this.state
+    this.publish({ ...rest, open: false, surfaceOpen: false })
   }
 
   authChanged(authenticated = false, resetSelection = false): void {
@@ -65,6 +69,7 @@ export class ArkmeUiController {
       })
       return
     }
+    this.lastConversationSource = undefined
     const { selectedSource: _selectedSource, ...rest } = this.state
     this.publish({
       ...rest,
@@ -94,6 +99,11 @@ export class ArkmeUiController {
     this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'recordings' })
   }
 
+  showCalendar(): void {
+    const { recordingTarget: _recordingTarget, ...rest } = this.state
+    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'calendar' })
+  }
+
   showRecordingTarget(dateStamp: number, startAtMillis: number): void {
     const { selectedSource: _selectedSource, ...rest } = this.state
     this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'recordings', recordingTarget: { dateStamp, startAtMillis } })
@@ -104,12 +114,39 @@ export class ArkmeUiController {
     this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'search' })
   }
 
+  showExtensions(): void {
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
+    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'extensions' })
+  }
+
+  showConversations(): void {
+    const { recordingTarget: _recordingTarget, ...rest } = this.state
+    this.publish({
+      ...rest,
+      open: true,
+      surfaceOpen: true,
+      mode: 'source',
+      ...(this.lastConversationSource === undefined ? {} : { selectedSource: this.lastConversationSource }),
+    })
+  }
+
   showArko(): void {
     const { selectedSource: _selectedSource, ...rest } = this.state
     this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'arko' })
   }
 
+  openExtensionShare(shareRef: string): void {
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
+    this.publish({ ...rest, open: true, surfaceOpen: true, mode: 'source', extensionShareRef: shareRef })
+  }
+
+  dismissExtensionShare(): void {
+    const { extensionShareRef: _extensionShareRef, ...rest } = this.state
+    this.publish(rest)
+  }
+
   selectSource(source: ArkmeSourceItem): void {
+    this.lastConversationSource = source
     this.publish({ ...this.state, open: true, mode: 'source', selectedSource: source })
   }
 
@@ -120,6 +157,7 @@ export class ArkmeUiController {
       && next.mode === this.state.mode
       && next.recordingTarget?.dateStamp === this.state.recordingTarget?.dateStamp
       && next.recordingTarget?.startAtMillis === this.state.recordingTarget?.startAtMillis
+      && next.extensionShareRef === this.state.extensionShareRef
       && sameSource(next.selectedSource, this.state.selectedSource)) return
     this.state = next
     for (const listener of this.listeners) listener()

@@ -100,6 +100,25 @@ describe('extension center Host BFF', () => {
     expect(search).toHaveBeenCalledWith('天气', 10)
   })
 
+  it('rejects stale persistent Client calls with a specific unavailable error before invoking Host handlers', async () => {
+    const persistentClientState = vi.fn(() => ({
+      extension_id: 'ext-1', version: '1.0.0', mount: false, reason: 'version-mismatch',
+    }))
+
+    await expect(dispatchArkmeHostOperation(
+      {} as never,
+      'extensions.persistent.invoke',
+      { extensionId: 'ext-1', version: '1.0.0', method: 'read', args: null },
+      undefined,
+      { persistentClientState } as never,
+    )).rejects.toMatchObject({
+      code: 'extension-runtime-unavailable',
+      message: '插件不可用，请重启 DSH 后重试',
+      httpStatus: 409,
+    })
+    expect(persistentClientState).toHaveBeenCalledWith('ext-1', '1.0.0')
+  })
+
   it('resolves extension authors in the Host for public and owned details', async () => {
     const service = {
       extensionAuthors: vi.fn(async () => new Map([[77, { displayName: '发布者', arkmeId: 'publisher' }]])),
@@ -163,6 +182,22 @@ describe('extension center Host BFF', () => {
 		expect(rotateShareLink).toHaveBeenCalledWith({
 			extensionId: 'ext-owned', clientMutationId: '9f445b4f-55aa-45c1-9250-25161832d432',
 		})
+	})
+
+	it('routes link-scoped share detail through the same Host manager', async () => {
+		const readSharedDetail = vi.fn(async () => ({
+			name: '天气', description: '', visibility: 'private', share_scope: 'link_readonly',
+			latest_stable_version: '1.0.0', preview_images: [],
+			rating_summary: { average: 0, count: 0, histogram: [0, 0, 0, 0, 0] },
+		}))
+		await expect(dispatchArkmeHostOperation(
+			{} as never,
+			'extensions.share.detail',
+			{ shareRef: 'extshare_0123456789abcdef0123456789abcdef' },
+			undefined,
+			{ readSharedDetail } as never,
+		)).resolves.toMatchObject({ name: '天气', share_scope: 'link_readonly' })
+		expect(readSharedDetail).toHaveBeenCalledWith('extshare_0123456789abcdef0123456789abcdef')
 	})
 
   it('routes my-extension list and publish through the unified Host owner', async () => {

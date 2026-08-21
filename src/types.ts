@@ -60,6 +60,60 @@ export interface ArkmeSelfSummary {
   totalSec: number
 }
 
+export type ArkmeCalendarScopeKind = 'self'
+
+export interface ArkmeCalendarBucketDay {
+  bucketDate: string
+  count: number
+  protectedCount: number
+  hasRecords: boolean
+  firstSendAtMillis?: number
+}
+
+export interface ArkmeCalendarBucketPage {
+  scope: ArkmeCalendarScopeKind
+  startDate: string
+  endDate: string
+  timezone: string
+  refreshedAtMillis: number
+  days: ArkmeCalendarBucketDay[]
+}
+
+export type ArkmeCalendarContentAccessState = 'available' | 'protected' | 'unknown'
+
+export interface ArkmeCalendarRecordCursor {
+  sendAtMillis: number
+  recordUid: string
+}
+
+export interface ArkmeCalendarRecordItem {
+  recordUid: string
+  sendAtMillis: number
+  accessState: ArkmeCalendarContentAccessState
+  title: string
+  textContent: string
+  preview: string
+  topicTitle?: string
+  sourceKind: 'self' | 'topic' | 'chat' | 'unknown'
+  creationSource: number
+  templateKind: number
+  displayKind: number
+  protected: boolean
+  isUncategorized?: boolean
+  hasManualEdit?: boolean
+  hasPolish?: boolean
+}
+
+export interface ArkmeCalendarDayRecordPage {
+  scope: ArkmeCalendarScopeKind
+  bucketDate: string
+  timezone: string
+  refreshedAtMillis: number
+  items: ArkmeCalendarRecordItem[]
+  hasMore: boolean
+  nextCursor?: ArkmeCalendarRecordCursor
+}
+
 export interface ArkmePendingWrite {
   recordUid: string
   textContent: string
@@ -148,6 +202,27 @@ export interface ArkmeWorldFeedPage {
   total: number
   hasMore: boolean
   nextOffset?: number
+}
+
+export interface ArkmeWorldVoiceprintAvailabilityItem {
+  recordRef: string
+  playable: boolean
+}
+
+export interface ArkmeWorldVoiceprintAvailability {
+  items: ArkmeWorldVoiceprintAvailabilityItem[]
+}
+
+/** Browser-safe generated World voice chunk. The signed Audio URL stays inside the Provider. */
+export interface ArkmeWorldVoiceprintPlaybackChunk {
+  mediaRef: string
+  mimeType: string
+  durationMillis: number
+  cacheHit: boolean
+  chunkIndex: number
+  chunkCount: number
+  chunkStartRune: number
+  chunkEndRune: number
 }
 
 /** Browser-safe World comment or reply. Stable record IDs stay inside the Provider. */
@@ -319,6 +394,26 @@ export interface ArkmeSearchAssetItem {
   durationMillis?: number
 }
 
+/** Browser-safe image projection used by the desktop search image library. */
+export interface ArkmeImageSearchItem {
+  itemKey: string
+  mediaRef: string
+  recordUid: string
+  sendAtMillis: number
+  fileName: string
+  mimeType: string
+  size: number
+  recordTitle: string
+  sourceTitle?: string
+}
+
+export interface ArkmeImageSearchResult {
+  items: ArkmeImageSearchItem[]
+  hasMore: boolean
+  nextCursor?: string
+  queryGuard: ArkmeSearchQueryGuard
+}
+
 export interface ArkmeSearchRecordItem {
   recordUid: string
   sourceKind: number
@@ -393,6 +488,10 @@ export interface ArkmeProviderCapabilities {
     revisionPolling: true
     userProfile: true
     imageRead: true
+    /** Record-calendar bucket and day-record reads backed by the Arkme record service. */
+    recordCalendar?: true
+    /** Authorized image-library listing with opaque, account-bound media references is available. */
+    imageLibrary?: true
     sourceDirectory: true
     sourceTimeline: true
     sourceTextSend: true
@@ -417,6 +516,8 @@ export interface ArkmeProviderCapabilities {
     worldFeed?: true
     /** Optional additive capability for reading and writing World comments and replies. */
     worldInteractions?: true
+    /** Optional additive capability for author-voice playback of public World text. */
+    worldVoiceprintPlayback?: true
     /** Optional additive capability for the independent Arrangement consumer. */
     arrangements?: true
     /** Optional additive current-account Cordis/Profile/cloud extension inventory. */
@@ -1403,6 +1504,7 @@ export interface ArkmePluginUpdateInstallSnapshot {
 export interface ArkmeChatRealtimeState {
   revision: number
   connected: boolean
+  connectionGeneration: number
   lastEventAtMillis?: number
 }
 
@@ -1411,10 +1513,23 @@ export type ArkmeChatClientEvent = {
   revision: number
   connected: boolean
   refresh?: 'none' | 'if-stale' | 'force'
+  connectionGeneration: number
 } | {
   type: 'sessions-delta'
   revision: number
   updates: Array<{ sourceKey?: string; source: ArkmeSourceItem; timelineItems: ArkmeTimelineItem[] }>
+} | {
+  type: 'message-notification'
+  revision: number
+  notification: {
+    eventUid: string
+    sourceRef: string
+    sourceKey: string
+    sourceKind: 'private_chat' | 'group_chat'
+    title: string
+    body: string
+    eventAtMillis: number
+  }
 } | {
   type: 'read-ack'
   revision: number
@@ -1444,10 +1559,15 @@ export type ArkmePluginOperation =
   | 'records.create'
   | 'records.outbox'
   | 'records.retry'
+  | 'calendar.buckets'
+  | 'calendar.records'
   | 'user.profile'
   | 'user.profile.refresh'
   | 'image.read'
+  | 'images.list'
   | 'world.feed'
+  | 'world.voiceprint.availability'
+  | 'world.voiceprint.playback.generate'
   | 'world.interactions.list'
   | 'world.interactions.create-text'
   | 'world.image.read'
@@ -1499,8 +1619,10 @@ export type ArkmePluginOperation =
   | 'extensions.mine.publish'
   | 'extensions.metadata.update'
 	| 'extensions.share.rotate'
+	| 'extensions.share.detail'
   | 'extensions.installed-list'
   | 'extensions.enabled-state'
+  | 'extensions.persistent.client-state'
   | 'extensions.enabled.set'
   | 'extensions.preview.delete'
   | 'extensions.preview.reorder'

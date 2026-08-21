@@ -34,6 +34,7 @@ export interface ArkmeMediaDescriptor {
   fileName: string
   size: number
   expiresAtMillis: number
+  stableKey?: string
 }
 
 interface ArkmePreparedUpload {
@@ -96,6 +97,43 @@ function allowedSignedImageHost(environment: 'test' | 'prod', hostname: string):
     ? ['jotmo-userfiles.oss-cn-hangzhou.aliyuncs.com', 'userfiles.jotmo.cc']
     : ['jotmo-userfiles-test.oss-cn-hangzhou.aliyuncs.com', 'jotmo-userfiles.senguo.me']
   return allowed.includes(hostname.toLowerCase())
+}
+
+function allowedSignedAudioHost(environment: 'test' | 'prod', hostname: string): boolean {
+  const allowed = environment === 'prod'
+    ? ['jotmo-useraudio.oss-cn-hangzhou.aliyuncs.com']
+    : ['jotmo-useraudio-test.oss-cn-hangzhou.aliyuncs.com']
+  return allowed.includes(hostname.toLowerCase())
+}
+
+function trustedWorldVoiceprintAudioUrl(environment: 'test' | 'prod', raw: string): URL {
+  let parsed: URL
+  try { parsed = new URL(raw.trim()) }
+  catch (error) {
+    throw new ArkmePluginError('world-voiceprint-audio-invalid', '世界声纹音频地址无效', true, 502, { cause: error })
+  }
+  const signature = parsed.searchParams.get('x-oss-signature')?.trim() ?? ''
+  if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '' || parsed.hash !== ''
+    || !allowedSignedAudioHost(environment, parsed.hostname) || parsed.pathname.replace(/^\/+/, '') === ''
+    || signature === '') {
+    throw new ArkmePluginError('world-voiceprint-audio-rejected', '世界声纹音频来源不受信任', false, 502)
+  }
+  return parsed
+}
+
+function worldVoiceprintFileName(mimeType: string): string {
+  const subtype = mimeType.split(';', 1)[0]!.trim().toLowerCase().replace(/^audio\//, '')
+  const extension = ({
+    wav: 'wav',
+    'x-wav': 'wav',
+    mpeg: 'mp3',
+    mp4: 'm4a',
+    aac: 'aac',
+    ogg: 'ogg',
+    webm: 'webm',
+    flac: 'flac',
+  } as Record<string, string>)[subtype]
+  return extension === undefined ? '世界声纹' : `世界声纹.${extension}`
 }
 
 function trustedSignedImageUrl(environment: 'test' | 'prod', raw: string): URL {
@@ -175,6 +213,7 @@ function cloneImageBytes(value: ArkmeImageBytes): ArkmeImageBytes {
 
 export class MediaService {
   private readonly mediaRefs = new Map<string, ArkmeMediaDescriptor>()
+  private readonly stableMediaRefs = new Map<string, string>()
   private readonly imageCache = new Map<string, CacheEntry<ArkmeImageBytes>>()
   private readonly imageInFlight = new Map<string, Promise<ArkmeImageBytes>>()
   private imageCacheBytes = 0
@@ -190,6 +229,7 @@ export class MediaService {
 
   dispose(): void {
     this.mediaRefs.clear()
+    this.stableMediaRefs.clear()
     this.imageCache.clear()
     this.imageInFlight.clear()
     this.imageCacheBytes = 0
@@ -310,26 +350,44 @@ export class MediaService {
   async fetchMedia(
     mediaRef: string,
     range?: string,
+    signal?: AbortSignal,
   ): Promise<{ response: Response; descriptor: ArkmeMediaDescriptor }> {
     const session = await this.runtime.requireSession()
     const descriptor = this.mediaRefs.get(mediaRef)
     if (descriptor === undefined || descriptor.viewerUserId !== session.userId || descriptor.expiresAtMillis <= Date.now()) {
       this.mediaRefs.delete(mediaRef)
+      if (descriptor?.stableKey !== undefined) this.stableMediaRefs.delete(descriptor.stableKey)
       throw new ArkmePluginError('media-ref-invalid', '媒体引用已失效，请刷新对话后重试', false, 404)
     }
     const url = new URL(descriptor.remoteUrl)
     if (url.protocol !== 'https:' || url.username !== '' || url.password !== ''
-      || !allowedSignedImageHost(this.runtime.config.environment, url.hostname)) {
+      || !(allowedSignedImageHost(this.runtime.config.environment, url.hostname)
+        || allowedSignedAudioHost(this.runtime.config.environment, url.hostname))) {
       throw new ArkmePluginError('media-host-rejected', '媒体来源不受信任', false, 403)
     }
     const response = await this.runtime.fetchImpl(url, {
       headers: range === undefined ? {} : { Range: range },
       redirect: 'error',
+      ...(signal === undefined ? {} : { signal }),
     })
     if (!response.ok && response.status !== 206) {
       throw new ArkmePluginError('media-fetch-failed', `媒体读取失败（${String(response.status)}）`, true, 502)
     }
     return { response, descriptor }
+  }
+
+  issueWorldVoiceprintMediaRef(viewerUserId: number, input: { remoteUrl: string; mimeType: string }): string {
+    const remoteUrl = trustedWorldVoiceprintAudioUrl(this.runtime.config.environment, input.remoteUrl).toString()
+    const mimeType = input.mimeType.trim() || 'audio/wav'
+    if (!mimeType.startsWith('audio/')) {
+      throw new ArkmePluginError('world-voiceprint-mime-invalid', '世界声纹音频格式无效', true, 502)
+    }
+    return this.issueMediaRef(viewerUserId, {
+      remoteUrl,
+      mimeType,
+      fileName: worldVoiceprintFileName(mimeType),
+      size: 0,
+    })
   }
 
   async readImage(
@@ -406,6 +464,13 @@ export class MediaService {
     byteLimit: number,
     signal?: AbortSignal,
   ): Promise<ArkmeImageBytes> {
+    if (imageRef.trim().startsWith('arkme-media-v1.')) {
+      const { response, descriptor } = await this.fetchMedia(imageRef.trim(), undefined, signal)
+      if (!descriptor.mimeType.trim().toLowerCase().startsWith('image/')) {
+        throw new ArkmePluginError('image-type-unsupported', '该媒体引用不是图片', false, 415)
+      }
+      return await this.imageBytesFromResponse(response, byteLimit)
+    }
     if (imageRef.trim().startsWith('arkme-profile-image-v1.')) {
       const reference = await this.profile.openProfileImageRef(imageRef, session.userId)
       if (reference.targetUserId === session.userId) {
@@ -575,21 +640,42 @@ export class MediaService {
     return { displayItemsByRecordUid, unavailableRecordUids }
   }
 
+  issueImageMediaRef(
+    viewerUserId: number,
+    descriptor: Omit<ArkmeMediaDescriptor, 'viewerUserId' | 'expiresAtMillis' | 'stableKey'>,
+    stableIdentity: string,
+  ): string {
+    return this.issueMediaRef(viewerUserId, descriptor, stableIdentity)
+  }
+
   private issueMediaRef(
     viewerUserId: number,
-    descriptor: Omit<ArkmeMediaDescriptor, 'viewerUserId' | 'expiresAtMillis'>,
+    descriptor: Omit<ArkmeMediaDescriptor, 'viewerUserId' | 'expiresAtMillis' | 'stableKey'>,
+    stableIdentity?: string,
   ): string {
     const now = Date.now()
     for (const [key, value] of this.mediaRefs) {
-      if (value.expiresAtMillis <= now) this.mediaRefs.delete(key)
+      if (value.expiresAtMillis <= now) {
+        this.mediaRefs.delete(key)
+        if (value.stableKey !== undefined) this.stableMediaRefs.delete(value.stableKey)
+      }
     }
     while (this.mediaRefs.size >= 2_000) {
       const oldest = this.mediaRefs.keys().next().value as string | undefined
       if (oldest === undefined) break
+      const oldestDescriptor = this.mediaRefs.get(oldest)
       this.mediaRefs.delete(oldest)
+      if (oldestDescriptor?.stableKey !== undefined) this.stableMediaRefs.delete(oldestDescriptor.stableKey)
     }
-    const ref = `arkme-media-v1.${randomUUID()}`
-    this.mediaRefs.set(ref, { ...descriptor, viewerUserId, expiresAtMillis: now + 30 * 60_000 })
+    const stableKey = stableIdentity === undefined
+      ? undefined
+      : createHash('sha256').update(`${String(viewerUserId)}\0${stableIdentity}`).digest('base64url')
+    const cachedRef = stableKey === undefined ? undefined : this.stableMediaRefs.get(stableKey)
+    const ref = cachedRef ?? `arkme-media-v1.${randomUUID()}`
+    this.mediaRefs.delete(ref)
+    const lifetimeMillis = stableKey === undefined ? 30 * 60_000 : 24 * 60 * 60_000
+    this.mediaRefs.set(ref, { ...descriptor, viewerUserId, expiresAtMillis: now + lifetimeMillis, ...(stableKey === undefined ? {} : { stableKey }) })
+    if (stableKey !== undefined) this.stableMediaRefs.set(stableKey, ref)
     return ref
   }
 
@@ -632,7 +718,7 @@ export class MediaService {
         kind,
         mediaRef: this.issueMediaRef(viewerUserId, {
           remoteUrl, mimeType, fileName, size: Math.max(0, Math.trunc(numberValue(item.size))),
-        }),
+        }, kind === 'image' && fileAssetUid !== '' ? fileAssetUid : undefined),
         ...(fileAssetUid === '' ? {} : { fileAssetUid }),
         fileName,
         mimeType,
@@ -703,38 +789,7 @@ export class MediaService {
       if (!response.ok) {
         throw new ArkmePluginError('image-download-failed', `Arkme 图片读取返回 HTTP ${response.status}`, true, 502)
       }
-      const declaredLength = Number(response.headers.get('content-length') ?? 0)
-      if (Number.isFinite(declaredLength) && declaredLength > byteLimit) {
-        throw new ArkmePluginError('image-too-large', 'Arkme 图片超过读取大小限制', false, 413)
-      }
-      if (response.body === null) {
-        throw new ArkmePluginError('image-response-empty', 'Arkme 图片响应为空', true, 502)
-      }
-      const chunks: Uint8Array[] = []
-      let bytes = 0
-      const reader = response.body.getReader()
-      while (true) {
-        const next = await reader.read()
-        if (next.done) break
-        bytes += next.value.byteLength
-        if (bytes > byteLimit) {
-          await reader.cancel()
-          throw new ArkmePluginError('image-too-large', 'Arkme 图片超过读取大小限制', false, 413)
-        }
-        chunks.push(next.value)
-      }
-      if (bytes === 0) throw new ArkmePluginError('image-response-empty', 'Arkme 图片响应为空', true, 502)
-      const data = new Uint8Array(bytes)
-      let offset = 0
-      for (const chunk of chunks) {
-        data.set(chunk, offset)
-        offset += chunk.byteLength
-      }
-      const mediaType = imageMediaType(data)
-      if (mediaType === undefined) {
-        throw new ArkmePluginError('image-type-unsupported', 'Arkme 图片不是受支持的 PNG、JPEG、WebP 或 GIF', false, 415)
-      }
-      return { mediaType, bytes, data }
+      return await this.imageBytesFromResponse(response, byteLimit)
     } catch (error) {
       if (error instanceof ArkmePluginError) throw error
       if ((error as Error).name === 'AbortError') {
@@ -745,5 +800,40 @@ export class MediaService {
       clearTimeout(timeout)
       signal?.removeEventListener('abort', abort)
     }
+  }
+
+  private async imageBytesFromResponse(response: Response, byteLimit: number): Promise<ArkmeImageBytes> {
+    const declaredLength = Number(response.headers.get('content-length') ?? 0)
+    if (Number.isFinite(declaredLength) && declaredLength > byteLimit) {
+      throw new ArkmePluginError('image-too-large', 'Arkme 图片超过读取大小限制', false, 413)
+    }
+    if (response.body === null) {
+      throw new ArkmePluginError('image-response-empty', 'Arkme 图片响应为空', true, 502)
+    }
+    const chunks: Uint8Array[] = []
+    let bytes = 0
+    const reader = response.body.getReader()
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      bytes += next.value.byteLength
+      if (bytes > byteLimit) {
+        await reader.cancel()
+        throw new ArkmePluginError('image-too-large', 'Arkme 图片超过读取大小限制', false, 413)
+      }
+      chunks.push(next.value)
+    }
+    if (bytes === 0) throw new ArkmePluginError('image-response-empty', 'Arkme 图片响应为空', true, 502)
+    const data = new Uint8Array(bytes)
+    let offset = 0
+    for (const chunk of chunks) {
+      data.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    const mediaType = imageMediaType(data)
+    if (mediaType === undefined) {
+      throw new ArkmePluginError('image-type-unsupported', 'Arkme 图片不是受支持的 PNG、JPEG、WebP 或 GIF', false, 415)
+    }
+    return { mediaType, bytes, data }
   }
 }

@@ -1,5 +1,6 @@
 import { arkoToolModules } from './arko/index.js'
 import { botToolModules } from './bots/index.js'
+import { recordCalendarToolModules } from './calendar/index.js'
 import type { ArkmeToolModule } from '../contract/module.js'
 import { accountBusinessToolModules } from './account/index.js'
 import { listSourcesToolModule } from './conversation/list-sources.js'
@@ -15,6 +16,7 @@ import { textAiVideoToolModule } from './media/text-ai-video.js'
 import { readImageToolModule } from './media/read-image.js'
 import { recordingToolModules } from './recordings/index.js'
 import { createRecordToolModule } from './records/create.js'
+import { listImagesToolModule } from './records/images.js'
 import { recentRecordsToolModule } from './records/recent.js'
 import { searchRecordsToolModule } from './records/search.js'
 import { worldPublishTextToolModule, worldRecentToolModule } from './world/index.js'
@@ -27,6 +29,8 @@ export const businessToolModules: readonly ArkmeToolModule[] = [
   ...accountBusinessToolModules,
   ...arkoToolModules,
   searchRecordsToolModule,
+  ...recordCalendarToolModules,
+  listImagesToolModule,
   createRecordToolModule,
   ...botToolModules,
   worldRecentToolModule,

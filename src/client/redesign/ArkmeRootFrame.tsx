@@ -4,6 +4,7 @@ import {
 } from 'react'
 import { ArrowUp } from '@phosphor-icons/react/ArrowUp'
 import { CaretDown } from '@phosphor-icons/react/CaretDown'
+import { CalendarBlank } from '@phosphor-icons/react/CalendarBlank'
 import { ChatCircleText } from '@phosphor-icons/react/ChatCircleText'
 import { CheckSquare } from '@phosphor-icons/react/CheckSquare'
 import { GearSix } from '@phosphor-icons/react/GearSix'
@@ -23,6 +24,7 @@ import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { ArkmeMark } from '../ArkmeFooterAction.js'
 import { ArkmeExtensionCenter } from '../ArkmeExtensionCenter.js'
+import { ArkmeCalendarSurface } from '../ArkmeCalendarSurface.js'
 import { ArkmeRecordingSurface } from '../ArkmeRecordingSurface.js'
 import { ArkmeSearchSurface } from '../ArkmeSearchSurface.js'
 import { ArkmeSettingsRow } from '../ArkmeSettingsRow.js'
@@ -48,7 +50,7 @@ export function installArkmeRedesignStyles(): () => void {
   return () => { style.remove() }
 }
 
-export type ArkmeRoute = 'chats' | 'tasks' | 'recordings' | 'search' | 'plugins' | 'settings'
+export type ArkmeRoute = 'chats' | 'tasks' | 'recordings' | 'search' | 'calendar' | 'plugins' | 'settings'
 
 export interface ArkmeRootInjected {
   layout: ArkmeLayoutController
@@ -74,6 +76,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { id: 'tasks', label: '任务', icon: ListChecks },
   { id: 'recordings', label: '录音', icon: Waveform },
   { id: 'search', label: '搜索', icon: MagnifyingGlass },
+  { id: 'calendar', label: '日历', icon: CalendarBlank },
   { id: 'plugins', label: '插件', icon: SquaresFour },
 ]
 
@@ -265,6 +268,8 @@ export function ArkmeRootFrame({
     if (next === 'chats') arkmeUi.focusSendToSelf()
     if (next === 'recordings') arkmeUi.showRecordings()
     if (next === 'search') arkmeUi.showSearch()
+    if (next === 'calendar') arkmeUi.showCalendar()
+    if (next === 'plugins') arkmeUi.showExtensions()
   }
 
   const showTaskStart = current === undefined || current.blank
@@ -349,7 +354,7 @@ export function ArkmeRootFrame({
       <div className="arkme-redesign-chat-directory">
         <ArkmeNavigation
           wide
-          variant="redesign-chats"
+          embeddedProductShell
           currentSessionId={sessionState.current}
           onActivateSurface={() => undefined}
           renderSlot={renderSlot}
@@ -374,7 +379,7 @@ export function ArkmeRootFrame({
           }} />
           : renderSlot('conversation', {})
         : route === 'chats'
-          ? <div className="arkme-redesign-route-surface arkme-redesign-route-chats"><ArkmeSurface /></div>
+          ? <div className="arkme-redesign-route-surface arkme-redesign-route-chats"><ArkmeSurface productChrome={false} /></div>
           : route === 'recordings'
             ? <section className="arkme-redesign-feature-page arkme-redesign-recordings-page">
               <div className="arkme-redesign-feature-body"><ArkmeRecordingSurface /></div>
@@ -384,6 +389,8 @@ export function ArkmeRootFrame({
                 <header><p>搜索</p><h1>一句话，找到所有内容</h1><span>对话、录音和任务会一起搜索。</span></header>
                 <div className="arkme-redesign-feature-body"><ArkmeSearchSurface /></div>
               </section>
+              : route === 'calendar'
+                ? <div className="arkme-redesign-route-surface arkme-redesign-calendar-page"><ArkmeCalendarSurface /></div>
               : route === 'plugins'
                 ? <section className="arkme-redesign-feature-page arkme-redesign-plugins-page">
                   <header><p>插件</p><h1>扩展 Arkme 的能力</h1><span>安装后直接告诉 Arkme 你想完成什么。</span></header>

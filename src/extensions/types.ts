@@ -28,6 +28,25 @@ export interface ArkmeExtensionShare {
 	url: string
 }
 
+export interface ArkmeSharedExtensionPreview {
+	preview_ref: string
+	width: number
+	height: number
+}
+
+/** Link-capability projection. It intentionally contains no extension_id or install facts. */
+export interface ArkmeSharedExtensionDetail {
+	name: string
+	description: string
+	visibility: 'private' | 'public'
+	share_scope: 'link_readonly'
+	latest_stable_version: string
+	icon_ref?: string
+	preview_images: ArkmeSharedExtensionPreview[]
+	rating_summary: ArkmeExtensionRatingSummary
+	source?: ArkmeExtensionSource
+}
+
 export interface ArkmeExtensionManifest {
   format: typeof ARKME_EXTENSION_FORMAT
   format_version: typeof ARKME_EXTENSION_FORMAT_VERSION
@@ -394,6 +413,13 @@ export interface ArkmeInstalledExtension {
 }
 
 /** Browser/model-safe projection. Host filesystem paths and Dynamic Cordis IDs stay private. */
+export const ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE = '插件运行失败，已自动停用。'
+
+export interface ArkmeExtensionUnavailableView {
+  code: 'runtime-load-failed'
+  message: typeof ARKME_EXTENSION_RUNTIME_UNAVAILABLE_MESSAGE
+}
+
 export type ArkmeInstalledExtensionView = Pick<
   ArkmeInstalledExtension,
   | 'extensionId'
@@ -405,7 +431,7 @@ export type ArkmeInstalledExtensionView = Pick<
   | 'updateChannel'
   | 'installedAtMillis'
   | 'lastCheckedAtMillis'
->
+> & { unavailable?: ArkmeExtensionUnavailableView }
 
 export interface ArkmeExtensionEnabledResult {
   extension_id: string
@@ -414,6 +440,7 @@ export interface ArkmeExtensionEnabledResult {
   active: boolean
   restart_required: boolean
   message: string
+  unavailable?: ArkmeExtensionUnavailableView
 }
 
 export interface ArkmeExtensionEnabledState {
@@ -421,6 +448,7 @@ export interface ArkmeExtensionEnabledState {
   installed: boolean
   enabled: boolean
   active: boolean
+  unavailable?: ArkmeExtensionUnavailableView
 }
 
 export interface ArkmeExtensionUpdateResolution {

@@ -409,6 +409,98 @@ describe('ArkmeService', () => {
     })
   })
 
+  it('reads record calendar buckets and day records from the Record origin', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const requests: Array<{ url: string; body: Record<string, unknown>; authorization: string }> = []
+    const service = new ArkmeService(config, sessions, new MemoryStateStore(), async (input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      requests.push({
+        url: String(input),
+        body,
+        authorization: new Headers(init?.headers).get('Authorization') ?? '',
+      })
+      if (String(input).endsWith('/api/v1/calendar/buckets/query')) {
+        return json({ code: 200, data: {
+          timezone: 'Asia/Shanghai',
+          daily_data: [{ bucket_date: '2026-08-21', count: 41, protected_count: 2, first_send_at: 1_787_310_000_000 }],
+        } })
+      }
+      if (String(input).endsWith('/api/v1/calendar/records/query')) {
+        return json({ code: 200, data: {
+          timezone: 'Asia/Shanghai',
+          items: [{
+            record_uid: 'record-1',
+            send_at: 1_787_310_000_000,
+            is_uncategorized: true,
+            record_core: {
+              record_uid: 'record-1',
+              send_at: 1_787_310_000_000,
+              content_access_state: 1,
+              title: '会议纪要',
+              text_content: '讨论日历迁移',
+              creation_source: 2,
+              template_kind: 1,
+              display_kind: 0,
+              has_manual_edit: false,
+              has_polish: true,
+            },
+            topic_core: { title: '前端重构' },
+          }],
+          has_more: true,
+          next_cursor_send_at: 1_787_300_000_000,
+          next_cursor_record_uid: 'record-next',
+        } })
+      }
+      throw new Error(`unexpected ${String(input)}`)
+    })
+
+    await expect(service.calendarBuckets({
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+      timezone: 'Asia/Shanghai',
+    })).resolves.toMatchObject({
+      scope: 'self',
+      days: [{ bucketDate: '2026-08-21', count: 41, protectedCount: 2, hasRecords: true }],
+    })
+    await expect(service.calendarRecords({
+      bucketDate: '2026-08-21',
+      timezone: 'Asia/Shanghai',
+      limit: 10,
+      cursor: { sendAtMillis: 1_787_300_000_000, recordUid: 'record-next' },
+    })).resolves.toMatchObject({
+      scope: 'self',
+      items: [{ recordUid: 'record-1', title: '会议纪要', textContent: '讨论日历迁移', topicTitle: '前端重构' }],
+      nextCursor: { sendAtMillis: 1_787_300_000_000, recordUid: 'record-next' },
+    })
+    expect(requests).toMatchObject([
+      {
+        url: 'https://record.test/api/v1/calendar/buckets/query',
+        authorization: 'Bearer access',
+        body: {
+          bucket_scope_kind: 1,
+          bucket_scope_uid: '',
+          start_date: '2026-08-01',
+          end_date: '2026-08-31',
+          timezone: 'Asia/Shanghai',
+        },
+      },
+      {
+        url: 'https://record.test/api/v1/calendar/records/query',
+        authorization: 'Bearer access',
+        body: {
+          bucket_scope_kind: 1,
+          bucket_scope_uid: '',
+          bucket_date: '2026-08-21',
+          timezone: 'Asia/Shanghai',
+          limit: 10,
+          cursor_send_at: 1_787_300_000_000,
+          cursor_record_uid: 'record-next',
+        },
+      },
+    ])
+  })
+
   it('loads recording day sections independently and refreshes an expired Audio bearer', async () => {
     const sessions = new MemorySessionStore()
     sessions.session = { userId: 10001, accessToken: 'expired', refreshToken: 'refresh' }
@@ -622,6 +714,7 @@ describe('ArkmeService', () => {
         revisionPolling: true,
         userProfile: true,
         imageRead: true,
+        recordCalendar: true,
         outgoingCall: true,
         myExtensions: true,
         extensionPublish: true,
@@ -1957,12 +2050,14 @@ describe('ArkmeService', () => {
     const internal = service as unknown as {
       handleChatRealtimeNotice(notice: {
         cause: 'reconcile'
-        state: { revision: number; connected: boolean }
+        state: { revision: number; connected: boolean; connectionGeneration: number }
       }): void
     }
 
     expect(service.chatRealtimeInitialEvent()).toMatchObject({ type: 'reconcile', refresh: 'if-stale' })
-    internal.handleChatRealtimeNotice({ cause: 'reconcile', state: { revision: 1, connected: true } })
+    internal.handleChatRealtimeNotice({
+      cause: 'reconcile', state: { revision: 1, connected: true, connectionGeneration: 1 },
+    })
     expect(events).toEqual([expect.objectContaining({ type: 'reconcile', refresh: 'none', connected: true })])
   })
 
@@ -3030,6 +3125,102 @@ describe('ArkmeService', () => {
     ])
   })
 
+  it('builds an image-only safe projection after draining a video-only scene page', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    const requestBodies: Record<string, unknown>[] = []
+    const service = new ArkmeService(config, sessions, new MemoryStateStore(), async (input, init) => {
+      const url = String(input)
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      if (url.endsWith('/api/v1/search/records/scene/query')) {
+        requestBodies.push(body)
+        if (body.cursor === undefined) return json({ code: 0, data: {
+          items: [{
+            record_uid: 'video-record', send_at: 200,
+            record_core: { content_payload: { media_refs: [{ file_asset_uid: 'video-asset', file_kind: 3, mime_type: 'video/mp4' }] } },
+          }],
+          has_more: true, next_cursor: 'image-page', query_guard: { state: 'ok' },
+        } })
+        return json({ code: 0, data: {
+          items: [{
+            record_uid: 'image-record', send_at: 100, record_core: {
+              title: '桌面截图',
+              content_payload: { media_refs: [
+                // Production scene search may omit both MIME and file_kind.
+                { file_asset_uid: 'image-asset', file_name: '截图.png', size: 2048 },
+                { file_asset_uid: 'video-cover', file_kind: 3, mime_type: 'video/mp4', file_name: '片段.mp4' },
+                { file_asset_uid: 'ambiguous-video', file_name: '视频封面.jpg' },
+              ] },
+            },
+          }],
+          has_more: false, query_guard: { state: 'ok' },
+        } })
+      }
+      if (url.endsWith('/api/v1/files/assets/query')) {
+        requestBodies.push(body)
+        return json({ code: 0, data: { items: [{
+          file_asset_uid: 'image-asset', file_name: '截图.png', mime_type: 'image/png', status: 'ready',
+          preview_url: 'https://jotmo-userfiles-test.oss-cn-hangzhou.aliyuncs.com/private/signed-image.png?x-oss-signature=test',
+        }, {
+          file_asset_uid: 'ambiguous-video', file_name: '视频封面.jpg', mime_type: 'video/mp4', status: 'ready',
+          preview_url: 'https://jotmo-userfiles-test.oss-cn-hangzhou.aliyuncs.com/private/video-cover.jpg?x-oss-signature=test',
+        }] } })
+      }
+      if (url.includes('/private/signed-image.png')) {
+        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png', 'Content-Length': '8' },
+        })
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+
+    const result = await service.searchImages({ limit: 10 })
+
+    expect(result).toMatchObject({
+      items: [{
+        itemKey: expect.any(String), mediaRef: expect.stringMatching(/^arkme-media-v1\./),
+        recordUid: 'image-record', fileName: '截图.png', mimeType: 'image/png', recordTitle: '桌面截图',
+      }],
+      hasMore: false,
+    })
+    expect(JSON.stringify(result)).not.toContain('x-oss-signature')
+    expect(JSON.stringify(result)).not.toContain('image-asset')
+    expect(JSON.stringify(result)).not.toContain('video-cover')
+    expect(JSON.stringify(result)).not.toContain('ambiguous-video')
+    await expect(service.readImage(result.items[0]!.mediaRef)).resolves.toMatchObject({
+      mediaType: 'image/png', bytes: 8,
+    })
+    expect(requestBodies).toEqual([
+      { scene_kind: 3, limit: 10, search_scope: 'global' },
+      { scene_kind: 3, limit: 10, search_scope: 'global', cursor: 'image-page' },
+      { file_asset_uids: ['image-asset', 'ambiguous-video'] },
+    ])
+  })
+
+  it('keeps a continuation cursor after the bounded image-scene drain finds only videos', async () => {
+    const sessions = new MemorySessionStore()
+    sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
+    let pageCount = 0
+    const service = new ArkmeService(config, sessions, new MemoryStateStore(), async input => {
+      const url = String(input)
+      if (!url.endsWith('/api/v1/search/records/scene/query')) throw new Error(`unexpected request ${url}`)
+      pageCount += 1
+      return json({ code: 0, data: {
+        items: [{
+          record_uid: `video-record-${String(pageCount)}`, send_at: pageCount,
+          record_core: { content_payload: { media_refs: [{ file_asset_uid: `video-${String(pageCount)}`, file_kind: 3, mime_type: 'video/mp4' }] } },
+        }],
+        has_more: true, next_cursor: `page-${String(pageCount)}`, query_guard: { state: 'ok' },
+      } })
+    })
+
+    await expect(service.searchImages({ limit: 10 })).resolves.toMatchObject({
+      items: [], hasMore: true, nextCursor: 'page-8',
+    })
+    expect(pageCount).toBe(8)
+  })
+
   it('asks Arko through the AgentDirect Intelligent session and projects the SSE tail', async () => {
     const sessions = new MemorySessionStore()
     sessions.session = { userId: 10001, accessToken: 'access', refreshToken: 'refresh' }
@@ -3963,7 +4154,11 @@ describe('ArkmeService', () => {
     })
     expect(page.items[0]?.contentBlocks).toHaveLength(2)
     const mediaRef = page.items[0]?.contentBlocks?.[0]?.mediaRef ?? ''
+    const audioMediaRef = page.items[0]?.contentBlocks?.[1]?.mediaRef ?? ''
     expect(mediaRef).toMatch(/^arkme-media-v1\./)
+    const repeatedPage = await service.readSource(sourceRef)
+    expect(repeatedPage.items[0]?.contentBlocks?.[0]?.mediaRef).toBe(mediaRef)
+    expect(repeatedPage.items[0]?.contentBlocks?.[1]?.mediaRef).not.toBe(audioMediaRef)
     expect(JSON.stringify(page)).not.toContain('x-oss-signature=secret')
     expect(JSON.stringify(page)).not.toContain('jotmo_mobile_background_sound')
     expect(JSON.stringify(page)).not.toContain('asset-background')

@@ -18,6 +18,20 @@ function success(value: unknown): Response {
 afterEach(() => { vi.useRealTimers() })
 
 describe('Arkme SDK', () => {
+  it('lists image-library pages through the public same-origin operation', async () => {
+    const calls: Array<{ operation: string; params?: Record<string, unknown> }> = []
+    const sdk = createArkmeSdk({
+      fetchImpl: async (_input, init) => {
+        const request = JSON.parse(String(init?.body)) as { operation: string; params?: Record<string, unknown> }
+        calls.push(request)
+        return success({ items: [], hasMore: false, queryGuard: { state: 'complete' } })
+      },
+    })
+
+    await expect(sdk.images({ limit: 24, cursor: 'next-images' })).resolves.toMatchObject({ hasMore: false })
+    expect(calls).toEqual([{ operation: 'images.list', params: { limit: 24, cursor: 'next-images' } }])
+  })
+
   it('manages extension previews through same-origin Host operations', async () => {
     const previewRef = `preview_v1_${'a'.repeat(64)}`
     const secondRef = `preview_v1_${'b'.repeat(64)}`
@@ -85,11 +99,17 @@ describe('Arkme SDK', () => {
 
   it('exposes installed extensions and desired enable state without raw Profile paths', async () => {
     const calls: Array<{ operation: string; params?: Record<string, unknown> }> = []
+    const installed = [{
+      extensionId: 'ext-1', installedVersion: '1.0.0', manifest: { name: '故障扩展' },
+      enabled: false, active: false, permissionSnapshot: [], updateChannel: 'stable',
+      installedAtMillis: 1, lastCheckedAtMillis: 1,
+      unavailable: { code: 'runtime-load-failed', message: '插件运行失败，已自动停用。' },
+    }]
     const sdk = createArkmeSdk({
       fetchImpl: async (_input, init) => {
         const request = JSON.parse(String(init?.body)) as { operation: string; params?: Record<string, unknown> }
         calls.push(request)
-        if (request.operation === 'extensions.installed-list') return success([])
+        if (request.operation === 'extensions.installed-list') return success(installed)
         if (request.operation === 'extensions.enabled.set') return success({
           extension_id: 'ext-1', installed: true, enabled: false, active: false,
           restart_required: true, message: '已关闭',
@@ -98,7 +118,7 @@ describe('Arkme SDK', () => {
       },
     })
 
-    await expect(sdk.installedExtensions()).resolves.toEqual([])
+    await expect(sdk.installedExtensions()).resolves.toEqual(installed)
     await expect(sdk.setExtensionEnabled('ext-1', false)).resolves.toMatchObject({ enabled: false })
     expect(calls).toEqual([
       { operation: 'extensions.installed-list' },
@@ -137,6 +157,7 @@ describe('Arkme SDK', () => {
             features: {
               authStatus: true, cachedSnapshot: true, remoteRefresh: true, search: true,
               createText: true, retryOutbox: true, revisionPolling: true, userProfile: true, imageRead: true,
+              recordCalendar: true,
               sourceDirectory: true, sourceTimeline: true, sourceTextSend: true, outgoingCall: true,
               extensionManagement: true,
               extensionIcons: true,
@@ -160,6 +181,12 @@ describe('Arkme SDK', () => {
         if (request.operation === 'image.read') {
           return success({ mediaType: 'image/png', bytes: 8, dataBase64: 'iVBORw0KGgo=' })
         }
+        if (request.operation === 'calendar.buckets') {
+          return success({ scope: 'self', startDate: '2026-08-01', endDate: '2026-08-31', timezone: 'Asia/Shanghai', refreshedAtMillis: 1, days: [] })
+        }
+        if (request.operation === 'calendar.records') {
+          return success({ scope: 'self', bucketDate: '2026-08-21', timezone: 'Asia/Shanghai', refreshedAtMillis: 1, items: [], hasMore: false })
+        }
         if (request.operation === 'records.create') return success({ recordUid: request.params?.recordUid, status: 1 })
         throw new Error(`unexpected ${request.operation}`)
       },
@@ -176,6 +203,17 @@ describe('Arkme SDK', () => {
     const image = await sdk.readImage('1_1700000000_1_0.png')
     expect(image).toMatchObject({ mediaType: 'image/png', bytes: 8 })
     expect(sdk.imageDataUrl(image)).toBe('data:image/png;base64,iVBORw0KGgo=')
+    await expect(sdk.calendarBuckets({
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+      timezone: 'Asia/Shanghai',
+    })).resolves.toMatchObject({ scope: 'self', days: [] })
+    await expect(sdk.calendarRecords({
+      bucketDate: '2026-08-21',
+      timezone: 'Asia/Shanghai',
+      limit: 10,
+      cursor: { sendAtMillis: 1_787_300_000_000, recordUid: 'record-next' },
+    })).resolves.toMatchObject({ scope: 'self', hasMore: false })
     await expect(sdk.createText('保存内容', { recordUid: 'a5d8df82-5b62-5b22-8f76-916a751ad63c' }))
       .resolves.toMatchObject({ status: 1 })
     expect(calls).toMatchObject([
@@ -183,6 +221,16 @@ describe('Arkme SDK', () => {
       { operation: 'records.search', params: { query: '复盘', limit: 5, syncAll: true } },
       { operation: 'user.profile.refresh' },
       { operation: 'image.read', params: { imageRef: '1_1700000000_1_0.png' } },
+      { operation: 'calendar.buckets', params: { startDate: '2026-08-01', endDate: '2026-08-31', timezone: 'Asia/Shanghai' } },
+      {
+        operation: 'calendar.records',
+        params: {
+          bucketDate: '2026-08-21',
+          timezone: 'Asia/Shanghai',
+          limit: 10,
+          cursor: { sendAtMillis: 1_787_300_000_000, recordUid: 'record-next' },
+        },
+      },
       {
         operation: 'records.create',
         params: { recordUid: 'a5d8df82-5b62-5b22-8f76-916a751ad63c', textContent: '保存内容' },
@@ -253,6 +301,13 @@ describe('Arkme SDK', () => {
 		if (request.operation === 'extensions.share.rotate') {
 			return success({ ref: 'extshare_0123456789abcdef0123456789abcdef', url: 'https://jiwo.cc/app/share/extension/extshare_0123456789abcdef0123456789abcdef' })
 		}
+		if (request.operation === 'extensions.share.detail') {
+			return success({
+				name: '天气', description: '天气扩展', visibility: 'private', share_scope: 'link_readonly',
+				latest_stable_version: '1.0.0', preview_images: [],
+				rating_summary: { average: 4.5, count: 2, histogram: [0, 0, 0, 1, 1] },
+			})
+		}
         throw new Error(`unexpected ${request.operation}`)
       },
     })
@@ -270,6 +325,9 @@ describe('Arkme SDK', () => {
 		await expect(sdk.rotateExtensionShare('ext-1', '07d24dc1-51ab-4e7d-9a6d-f7f50b652bf8')).resolves.toMatchObject({
 			ref: 'extshare_0123456789abcdef0123456789abcdef',
 		})
+		await expect(sdk.extensionShareDetail('extshare_0123456789abcdef0123456789abcdef')).resolves.toMatchObject({
+			name: '天气', share_scope: 'link_readonly',
+		})
     expect(calls).toEqual([
       { operation: 'extensions.mine.list', params: { currentSessionId: 'session-1' } },
       { operation: 'extensions.mine.publish', params: {
@@ -283,6 +341,9 @@ describe('Arkme SDK', () => {
       } },
 		{ operation: 'extensions.share.rotate', params: {
 			extensionId: 'ext-1', clientMutationId: '07d24dc1-51ab-4e7d-9a6d-f7f50b652bf8',
+		} },
+		{ operation: 'extensions.share.detail', params: {
+			shareRef: 'extshare_0123456789abcdef0123456789abcdef',
 		} },
     ])
     expect(() => sdk.publishMyExtension({
