@@ -59,6 +59,7 @@ import { isArkmeSelfWorkspaceSource } from './source-list.js'
 
 export interface ArkmeSurfaceProps {
   floating?: boolean
+  productNavigation?: boolean
   initialAuth?: ArkmeAuthSnapshot | undefined
   currentSessionId?: string | undefined
   renderSlot?: ArkmeNavigationProps['renderSlot']
@@ -465,7 +466,14 @@ function ForwardRecordsDetail({ item, onClose }: { item: ArkmeTimelineItem; onCl
   </aside>
 }
 
-export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, renderSlot, productChrome = true }: ArkmeSurfaceProps = {}) {
+export function ArkmeSurface({
+  floating = false,
+  initialAuth,
+  currentSessionId,
+  renderSlot,
+  productChrome = true,
+  productNavigation = productChrome,
+}: ArkmeSurfaceProps = {}) {
   const ui = useSyncExternalStore(arkmeUi.subscribe, arkmeUi.getSnapshot, arkmeUi.getSnapshot)
   const authStoreSnapshot = useSyncExternalStore(
     arkmeAuthStore.subscribe,
@@ -656,7 +664,9 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
       return
     }
     bindingNotifiedUserIdRef.current = undefined
-    if (accountChanged) arkmeUi.authChanged(true, true)
+    if (accountChanged || arkmeUi.getSnapshot().mode === 'login') {
+      arkmeUi.authChanged(true, accountChanged)
+    }
   }, [])
 
   useEffect(() => {
@@ -993,7 +1003,7 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
   }, [acknowledgeRead, authenticated, chatDelta, source?.sourceRef])
 
   useEffect(() => {
-    if (!authenticated || !ui.surfaceOpen || source?.kind !== 'group_chat') return
+    if (!authenticated || source?.kind !== 'group_chat') return
     let cancelled = false
     const refreshPresentation = () => {
       void callArkme<ArkmeGroupAiPolishSnapshot>('source.ai-polish.settings', {
@@ -1005,7 +1015,7 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
     }
     const timer = setInterval(refreshPresentation, 3_000)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [authenticated, source?.sourceRef, ui.surfaceOpen])
+  }, [authenticated, source?.sourceRef])
 
   useEffect(() => {
     const root = bodyRef.current; const sentinel = sentinelRef.current
@@ -1373,7 +1383,7 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
         ...(productChrome && compactNavigation ? styles.compactSurface : {}),
       }}
     >
-      {productChrome && authView === 'content' && <ArkmeProductNavigation
+      {productChrome && productNavigation && authView === 'content' && <ArkmeProductNavigation
         compact={compactNavigation}
         currentSessionId={currentSessionId}
       />}
@@ -1385,7 +1395,6 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
         <ArkmeNavigation
           currentSessionId={currentSessionId}
           embeddedProductShell
-          onActivateSurface={() => { arkmeUi.activateSurface() }}
           {...(renderSlot === undefined ? {} : { renderSlot })}
         />
       </aside>}

@@ -15,8 +15,6 @@ describe('ArkmeUiController', () => {
     controller.selectSource(source)
     controller.showRecordings()
     expect(controller.getSnapshot()).toEqual({
-      open: true,
-      surfaceOpen: true,
       authRevision: 0,
       chatRevision: 0,
       mode: 'recordings',
@@ -25,8 +23,6 @@ describe('ArkmeUiController', () => {
     controller.selectSource(source)
     controller.showCalendar()
     expect(controller.getSnapshot()).toMatchObject({
-      open: true,
-      surfaceOpen: true,
       authRevision: 0,
       chatRevision: 0,
       mode: 'calendar',
@@ -36,14 +32,12 @@ describe('ArkmeUiController', () => {
     controller.selectSource(source)
     controller.showArko()
     expect(controller.getSnapshot()).toEqual({
-      open: true,
-      surfaceOpen: true,
       authRevision: 0,
       chatRevision: 0,
       mode: 'arko',
     })
     controller.authChanged(true)
-    expect(controller.getSnapshot()).toMatchObject({ mode: 'arko', open: true, surfaceOpen: true, authRevision: 1 })
+    expect(controller.getSnapshot()).toMatchObject({ mode: 'arko', authRevision: 1 })
 
     controller.selectSource(source)
     expect(controller.getSnapshot()).toMatchObject({ mode: 'source', selectedSource: source })
@@ -68,22 +62,16 @@ describe('ArkmeUiController', () => {
     controller.selectSource(source)
     expect(controller.getSnapshot()).toMatchObject({ mode: 'source', selectedSource: source })
     controller.focusSendToSelf()
-    expect(controller.getSnapshot()).toEqual({ open: true, surfaceOpen: true, authRevision: 0, chatRevision: 0, mode: 'source' })
-    controller.deactivateSurface()
-    expect(controller.getSnapshot()).toMatchObject({ open: true, surfaceOpen: false })
-    controller.activateSurface()
-    expect(controller.getSnapshot()).toMatchObject({ open: true, surfaceOpen: true })
+    expect(controller.getSnapshot()).toEqual({ authRevision: 0, chatRevision: 0, mode: 'source' })
     controller.showLogin()
-    expect(controller.getSnapshot()).toEqual({ open: true, surfaceOpen: true, authRevision: 0, chatRevision: 0, mode: 'login' })
-    controller.showLoginSurface()
-    expect(controller.getSnapshot()).toMatchObject({ open: false, surfaceOpen: true, mode: 'login' })
+    expect(controller.getSnapshot()).toEqual({ authRevision: 0, chatRevision: 0, mode: 'login' })
     controller.authChanged(true)
-    expect(controller.getSnapshot()).toMatchObject({ open: true, surfaceOpen: true, mode: 'source' })
+    expect(controller.getSnapshot()).toMatchObject({ mode: 'source' })
     expect(controller.getSnapshot().selectedSource).toBeUndefined()
     expect(controller.getSnapshot().authRevision).toBe(1)
     controller.chatChanged()
     expect(controller.getSnapshot().chatRevision).toBe(1)
-    expect(listener).toHaveBeenCalledTimes(8)
+    expect(listener).toHaveBeenCalledTimes(5)
     unsubscribe()
   })
 
@@ -96,7 +84,7 @@ describe('ArkmeUiController', () => {
     controller.showSearch()
 
     expect(controller.getSnapshot()).toEqual({
-      open: true, surfaceOpen: true, authRevision: 0, chatRevision: 0, mode: 'search',
+      authRevision: 0, chatRevision: 0, mode: 'search',
     })
   })
 
@@ -109,7 +97,7 @@ describe('ArkmeUiController', () => {
 
     controller.authChanged(true, true)
 
-    expect(controller.getSnapshot()).toMatchObject({ open: true, surfaceOpen: true, mode: 'source' })
+    expect(controller.getSnapshot()).toMatchObject({ mode: 'source' })
     expect(controller.getSnapshot().selectedSource).toBeUndefined()
   })
 
@@ -122,7 +110,7 @@ describe('ArkmeUiController', () => {
     controller.showExtensions()
 
     expect(controller.getSnapshot()).toEqual({
-      open: true, surfaceOpen: true, authRevision: 0, chatRevision: 0, mode: 'extensions',
+      authRevision: 0, chatRevision: 0, mode: 'extensions',
     })
   })
 
@@ -137,7 +125,7 @@ describe('ArkmeUiController', () => {
     controller.showConversations()
 
     expect(controller.getSnapshot()).toMatchObject({
-      open: true, surfaceOpen: true, mode: 'source', selectedSource: source,
+      mode: 'source', selectedSource: source,
     })
   })
 
