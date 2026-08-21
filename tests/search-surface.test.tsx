@@ -7,8 +7,9 @@ describe('Arkme search surface', () => {
   it('starts with quick-note search and only exposes the supported AI video quick entry', () => {
     const markup = renderToStaticMarkup(<ArkmeSearchSurface />)
 
-    expect(markup).toContain('placeholder="搜索"')
-    expect(markup).toContain('/arkme-self/api/call/image_search_grey.svg')
+    expect(markup).toContain('placeholder="搜索人物、主题或你记得的一句话…"')
+    expect(markup).toContain('aria-label="搜索"')
+    expect(markup).not.toContain('/arkme-self/api/call/image_search_grey.svg')
     expect(markup).not.toContain('>搜索</button>')
     expect(markup).toContain('AI 视频')
     for (const label of ['图片/视频', '录音', '外部链接', '文件', '长文']) expect(markup).not.toContain(label)
@@ -19,6 +20,7 @@ describe('Arkme search surface', () => {
 
     expect(source).not.toContain("height: 'min(600px, calc(100vh - 96px))'")
     expect(source).not.toContain("width: 'min(470px, 100%)'")
-    expect(source).toContain("src={`${assetRoot}/arrow_left.svg`}")
+    expect(source).toContain("import { ArrowLeft } from '@phosphor-icons/react/ArrowLeft'")
+    expect(source).toContain('<ArrowLeft size={20} />')
   })
 })

@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { CaretLeft } from '@phosphor-icons/react/CaretLeft'
+import { CaretRight } from '@phosphor-icons/react/CaretRight'
+import { ArrowRight } from '@phosphor-icons/react/ArrowRight'
+import { ClockCounterClockwise } from '@phosphor-icons/react/ClockCounterClockwise'
+import { Waveform } from '@phosphor-icons/react/Waveform'
 import type {
   ArkmeRecordingCalendarDay,
   ArkmeRecordingCalendarMonth,
@@ -11,6 +16,13 @@ import { arkmeUi } from './ui-controller.js'
 import { arkmeTheme } from './arkme-theme.js'
 
 type RecordingTab = 'transcript' | 'summary' | 'timeline'
+
+interface RecordingSegment {
+  id: string
+  title: string
+  startAtMillis: number
+  endAtMillis: number
+}
 
 const colors = {
   text: arkmeTheme.text,
@@ -100,14 +112,10 @@ function dateKey(value: number | Date): string {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
 }
 
-function calendarCells(month: Date): Array<Date | undefined> {
-  const first = monthStart(month)
-  const leading = (first.getDay() + 6) % 7
-  const count = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
-  return [
-    ...Array.from<undefined>({ length: leading }),
-    ...Array.from({ length: count }, (_, index) => new Date(first.getFullYear(), first.getMonth(), index + 1)),
-  ]
+function weekCells(value: Date): Date[] {
+  const mondayOffset = (value.getDay() + 6) % 7
+  const monday = shiftDay(value, -mondayOffset)
+  return Array.from({ length: 7 }, (_, index) => shiftDay(monday, index))
 }
 
 function shiftDay(value: Date, amount: number): Date {
@@ -240,6 +248,7 @@ export function ArkmeRecordingSurface() {
   const [dayError, setDayError] = useState('')
   const [summaryVersionId, setSummaryVersionId] = useState('')
   const [timelineVersionId, setTimelineVersionId] = useState('')
+  const [selectedSessionId, setSelectedSessionId] = useState<string>()
 
   useEffect(() => {
     const target = ui.recordingTarget
@@ -272,7 +281,7 @@ export function ArkmeRecordingSurface() {
 
   useEffect(() => {
     let cancelled = false
-    setDay(undefined); setDayLoading(true); setDayError('')
+    setDay(undefined); setDayLoading(true); setDayError(''); setSelectedSessionId(undefined)
     setSummaryVersionId(''); setTimelineVersionId('')
     void callArkme<ArkmeRecordingDay>('recordings.day', { dateStamp: selectedDate.getTime() })
       .then(value => {
@@ -291,6 +300,34 @@ export function ArkmeRecordingSurface() {
   const totalDuration = selectedCalendarDay?.durationMillis ?? day?.totalDurationMillis ?? 0
   const selectedSummary = day?.summary.items.find(version => version.id === summaryVersionId && version.selectable)
   const selectedTimeline = day?.timeline.items.find(version => version.id === timelineVersionId && version.selectable)
+  const recordingSegments = useMemo<RecordingSegment[]>(() => {
+    const grouped = new Map<string, ArkmeRecordingDay['transcript']['items']>()
+    for (const item of day?.transcript.items ?? []) {
+      const values = grouped.get(item.sessionId) ?? []
+      values.push(item)
+      grouped.set(item.sessionId, values)
+    }
+    return [...grouped.entries()].map(([id, items], index) => {
+      const ordered = [...items].sort((left, right) => left.startAtMillis - right.startAtMillis)
+      const start = ordered[0]?.startAtMillis ?? 0
+      const end = ordered.at(-1)?.endAtMillis ?? start
+      const firstText = ordered.find(item => item.text.trim() !== '')?.text.trim() ?? ''
+      return {
+        id,
+        title: firstText === '' ? `录音片段 ${String(index + 1)}` : firstText.slice(0, 18),
+        startAtMillis: start,
+        endAtMillis: end,
+      }
+    }).sort((left, right) => left.startAtMillis - right.startAtMillis)
+  }, [day])
+  const selectedWeek = useMemo(() => weekCells(selectedDate), [selectedDate])
+  const timelineStart = recordingSegments[0]?.startAtMillis
+  const timelineEnd = recordingSegments.at(-1)?.endAtMillis
+
+  useEffect(() => {
+    if (recordingSegments.length === 0 || selectedSessionId !== undefined) return
+    setSelectedSessionId(recordingSegments[0]?.id)
+  }, [recordingSegments, selectedSessionId])
 
   const chooseDate = (value: Date) => {
     const normalized = startOfLocalDay(value)
@@ -303,7 +340,10 @@ export function ArkmeRecordingSurface() {
   const renderTranscript = () => {
     const section = day?.transcript
     if (dayLoading || section === undefined || section.state !== 'ready') return <SectionState section={section} loading={dayLoading} />
-    return <ul style={styles.transcriptList}>{section.items.map(item => <li key={item.itemId} style={styles.transcript}>
+    const visibleItems = selectedSessionId === undefined
+      ? section.items
+      : section.items.filter(item => item.sessionId === selectedSessionId)
+    return <ul style={styles.transcriptList}>{visibleItems.map(item => <li key={item.itemId} style={styles.transcript}>
       <time style={styles.time}>{timeLabel(item.startAtMillis)}</time>
       <RecordingSpeakerLabel label={item.speakerLabel} colorIndex={item.speakerColorIndex} isBackground={item.isBackground} />
       <p style={styles.transcriptText}>{item.text}</p>
@@ -350,32 +390,55 @@ export function ArkmeRecordingSurface() {
       gridTemplateColumns: compact ? 'minmax(0,1fr)' : '320px minmax(0,1fr)',
       gridTemplateRows: compact ? 'auto minmax(0,1fr)' : 'minmax(0,1fr)',
     }}>
-      <aside style={styles.calendar} aria-label="录音日历">
+      <aside className="arkme-recording-calendar" style={styles.calendar} aria-label="录音日历">
+        <header className="arkme-recording-page-title">
+          <span>录音</span>
+          <h1>时间与内容</h1>
+          <p>按日期查看全天候录音、转写、总结与时间轴。</p>
+        </header>
         <div style={styles.monthHeader}>
-          <button type="button" style={styles.iconButton} aria-label="上个月" onClick={() => { setVisibleMonth(value => new Date(value.getFullYear(), value.getMonth() - 1, 1)) }}>‹</button>
-          <h3 style={styles.monthTitle}>{visibleMonth.getFullYear()}年{visibleMonth.getMonth() + 1}月</h3>
-          <button type="button" style={styles.iconButton} aria-label="下个月" onClick={() => { setVisibleMonth(value => new Date(value.getFullYear(), value.getMonth() + 1, 1)) }}>›</button>
+          <button type="button" style={styles.iconButton} aria-label="上一周" onClick={() => { chooseDate(shiftDay(selectedDate, -7)) }}><CaretLeft size={15} /></button>
+          <h3 style={styles.monthTitle}>{selectedDate.getFullYear()}年{selectedDate.getMonth() + 1}月</h3>
+          <button type="button" style={styles.iconButton} aria-label="下一周" onClick={() => { chooseDate(shiftDay(selectedDate, 7)) }}><CaretRight size={15} /></button>
         </div>
         {calendarError !== '' && <div style={styles.error} role="alert">{calendarError}</div>}
         <div style={styles.week}>{['一', '二', '三', '四', '五', '六', '日'].map(label => <span key={label} style={styles.weekDay}>{label}</span>)}</div>
         <div style={{ ...styles.days, opacity: calendarLoading ? .55 : 1 }}>
-          {calendarCells(visibleMonth).map((date, index) => {
-            if (date === undefined) return <span key={`blank:${index}`} />
+          {selectedWeek.map(date => {
             const meta: ArkmeRecordingCalendarDay | undefined = calendarByDay.get(dateKey(date))
             const selected = dateKey(date) === dateKey(selectedDate)
             const isToday = dateKey(date) === dateKey(today)
             return <RecordingCalendarCell key={dateKey(date)} date={date} meta={meta} selected={selected} isToday={isToday} onClick={() => { chooseDate(date) }} />
           })}
         </div>
+        <div className="arkme-recording-segments">
+          <div><strong>{new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(selectedDate)}</strong><span>{recordingSegments.length} 段录音</span></div>
+          {recordingSegments.map(segment => <button
+            type="button"
+            key={segment.id}
+            className={selectedSessionId === segment.id ? 'is-selected' : ''}
+            onClick={() => { setSelectedSessionId(segment.id); setActiveTab('transcript') }}
+          >
+            <span><Waveform size={17} /></span>
+            <span><strong>{segment.title}</strong><small>{timeLabel(segment.startAtMillis)}–{timeLabel(segment.endAtMillis)}</small></span>
+            <ArrowRight size={15} />
+          </button>)}
+        </div>
       </aside>
 
-      <section style={styles.content} aria-label="录音详情">
+      <div className="arkme-recording-detail-stack">
+        <button type="button" className="arkme-recording-day-timeline" onClick={() => { setActiveTab('timeline') }}>
+          <span className="arkme-recording-day-timeline-title"><ClockCounterClockwise size={17} /><span><strong>当天时间轴</strong><small>{recordingSegments.length === 0 ? '当天暂无录音' : '点击查看可视化录音'}</small></span></span>
+          <span className="arkme-recording-day-timeline-range">{timelineStart === undefined || timelineEnd === undefined ? '--:--' : `${timeLabel(timelineStart).slice(0, 5)}–${timeLabel(timelineEnd).slice(0, 5)}`}</span>
+          <span className={`arkme-recording-day-timeline-track${recordingSegments.length === 0 ? ' is-empty' : ''}`} aria-hidden="true"><i /><i /></span>
+        </button>
+        <section style={styles.content} aria-label="录音详情">
         <header style={styles.contentHeader}>
           <div><h2 style={styles.dateTitle}>{dateTitle(selectedDate)}</h2><div style={styles.total}>{fullDuration(totalDuration)}</div></div>
           <div style={styles.dateControls}>
-            <button type="button" style={styles.iconButton} aria-label="前一天" onClick={() => { chooseDate(shiftDay(selectedDate, -1)) }}>‹</button>
+            <button type="button" style={styles.iconButton} aria-label="前一天" onClick={() => { chooseDate(shiftDay(selectedDate, -1)) }}><CaretLeft size={15} /></button>
             <button type="button" style={styles.todayButton} onClick={() => { chooseDate(today) }}>回到今天</button>
-            <button type="button" style={styles.iconButton} aria-label="后一天" onClick={() => { chooseDate(shiftDay(selectedDate, 1)) }}>›</button>
+            <button type="button" style={styles.iconButton} aria-label="后一天" onClick={() => { chooseDate(shiftDay(selectedDate, 1)) }}><CaretRight size={15} /></button>
           </div>
         </header>
         <nav style={styles.tabs} aria-label="录音内容">
@@ -386,7 +449,8 @@ export function ArkmeRecordingSurface() {
             : activeTab === 'transcript' ? renderTranscript()
               : activeTab === 'summary' ? renderSummary() : renderTimeline()}
         </div>
-      </section>
+        </section>
+      </div>
     </div>
   </div>
 }

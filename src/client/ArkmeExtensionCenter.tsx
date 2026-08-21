@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { ArrowLeft } from '@phosphor-icons/react/ArrowLeft'
+import { MagnifyingGlass } from '@phosphor-icons/react/MagnifyingGlass'
+import { Play } from '@phosphor-icons/react/Play'
+import { SpinnerGap } from '@phosphor-icons/react/SpinnerGap'
+import { X } from '@phosphor-icons/react/X'
 import type {
   ArkmeExtensionCatalogItem, ArkmeExtensionCatalogPage, ArkmeExtensionInstallPreview, ArkmeExtensionInstallTaskSnapshot,
   ArkmeExtensionEnabledResult, ArkmeExtensionPublishResult, ArkmeExtensionUpdateResolution, ArkmeInstalledExtensionView,
@@ -54,12 +59,19 @@ const styles: Record<string, CSSProperties> = {
     boxSizing: 'border-box', background: 'var(--dsw-alias-bg-mask-1, rgba(17, 24, 39, .20))',
     backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)',
   },
+  embeddedBackdrop: {
+    width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden',
+  },
   dialog: {
     position: 'relative',
     width: 'min(860px, calc(100vw - 64px))', height: 'min(680px, calc(100vh - 64px))',
     minWidth: 0, minHeight: 0, overflow: 'hidden', boxSizing: 'border-box',
     border: `1px solid ${colors.border}`, borderRadius: 18, background: colors.surface,
     boxShadow: '0 28px 80px rgba(20, 24, 31, .22), 0 4px 18px rgba(20, 24, 31, .08)',
+  },
+  embeddedDialog: {
+    width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden',
+    border: 0, borderRadius: 0, background: '#fff', boxShadow: 'none',
   },
   shell: {
     width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column',
@@ -241,14 +253,6 @@ const EMPTY_COPY: Record<Tab, { title: string; description: string }> = {
   updates: { title: '所有扩展均为最新版本', description: '有新版本或安全撤销时，会在这里提醒你。' },
 }
 
-function BackIcon({ size = 18 }: { size?: number }) {
-  return <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-}
-
-function CloseIcon() {
-  return <svg aria-hidden width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
-}
-
 function Chips({ children }: { children: ReactNode }) { return <div style={styles.chips}>{children}</div> }
 
 function Chip({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'active' | 'warning' }) {
@@ -283,12 +287,7 @@ export function ArkmeExtensionManifestDetails({ manifest }: { manifest: unknown 
 }
 
 function LoadingIcon() {
-  return <svg aria-hidden width="15" height="15" viewBox="0 0 20 20" fill="none">
-    <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="2" opacity=".22" />
-    <path d="M10 3a7 7 0 0 1 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur=".8s" repeatCount="indefinite" />
-    </path>
-  </svg>
+  return <SpinnerGap aria-hidden size={15} className="arkme-icon-spin" />
 }
 
 function InstallLoadingButton({ task, onPause, onResume }: {
@@ -304,7 +303,7 @@ function InstallLoadingButton({ task, onPause, onResume }: {
     type="button" style={{ ...styles.loadingButton, ...(action === undefined ? { cursor: 'default' } : {}) }}
     disabled={action === undefined} aria-label={label} title={label} onClick={action}
   >{paused
-      ? <svg aria-hidden width="13" height="13" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5-7-4.5Z" fill="currentColor" /></svg>
+      ? <Play aria-hidden size={13} weight="fill" />
       : <LoadingIcon />}</button>
 }
 
@@ -346,6 +345,7 @@ export function ExtensionCard({ item, installed, actionLabel, status, statusColo
 }) {
   const metadata = extensionCardMetadata(item)
   return <div
+    className="arkme-extension-card"
     style={styles.card}
     onMouseEnter={event => { event.currentTarget.style.background = colors.hover }}
     onMouseLeave={event => { event.currentTarget.style.background = 'transparent' }}
@@ -388,6 +388,7 @@ export function MyExtensionCard({ item, installed, toggleBusy = false, onPublish
   const action = myExtensionPrimaryAction(item)
   const version = displayVersion(item.published?.version ?? item.persisted?.version)
   return <div
+    className="arkme-extension-card"
     style={styles.card}
     onMouseEnter={event => { event.currentTarget.style.background = colors.hover }}
     onMouseLeave={event => { event.currentTarget.style.background = 'transparent' }}
@@ -418,7 +419,7 @@ export function MyExtensionCard({ item, installed, toggleBusy = false, onPublish
 
 function EmptyState({ tab }: { tab: Tab }) {
   const copy = EMPTY_COPY[tab]
-  return <div style={styles.empty}>
+  return <div className="arkme-extension-grid-span" style={styles.empty}>
     <span style={styles.emptyIcon}><ArkmeExtensionIcon size={22} /></span>
     <span style={styles.emptyTitle}>{copy.title}</span>
     <span style={styles.emptyDesc}>{copy.description}</span>
@@ -426,7 +427,7 @@ function EmptyState({ tab }: { tab: Tab }) {
 }
 
 function LoadingState() {
-  return <div aria-label="正在加载扩展"><div style={styles.skeleton} /><div style={styles.skeleton} /><div style={styles.skeleton} /></div>
+  return <div className="arkme-extension-grid-span" aria-label="正在加载扩展"><div style={styles.skeleton} /><div style={styles.skeleton} /><div style={styles.skeleton} /></div>
 }
 
 export function extensionInstallPercent(task: Pick<ArkmeExtensionInstallTaskSnapshot, 'phase' | 'downloadedBytes' | 'totalBytes'>): number {
@@ -566,12 +567,14 @@ function extensionEnabledLabel(item: ArkmeInstalledExtensionView): string {
   return item.active ? '已启用' : '已启用，尚未加载'
 }
 
-export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose }: {
+export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose, embedded = false }: {
   currentSessionId?: string | undefined
   currentUserId?: number | undefined
   onClose(): void
+  embedded?: boolean
 }) {
   const [tab, setTab] = useState<Tab>('discover')
+  const [searchQuery, setSearchQuery] = useState('')
   const [discoverItems, setDiscoverItems] = useState<ArkmeExtensionCatalogItem[]>([])
   const [publishedItems, setPublishedItems] = useState<ArkmeExtensionCatalogItem[]>([])
   const [discoverOwnerWarning, setDiscoverOwnerWarning] = useState('')
@@ -987,7 +990,23 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
   }
 
   const updateCount = updates.filter(item => item.update_available || item.revoked).length
+  const searchNeedle = searchQuery.trim().toLocaleLowerCase('zh-CN')
+  const matchesSearch = (name: string, description = '') => searchNeedle === ''
+    || `${name}\n${description}`.toLocaleLowerCase('zh-CN').includes(searchNeedle)
   const visibleItems = mergeExtensionDiscoverItems(discoverItems, publishedItems)
+    .filter(item => matchesSearch(item.name, item.description))
+  const visibleInstalled = installed.filter(item => {
+    const catalog = installedExtensionCatalogItem(item)
+    return matchesSearch(catalog.name, catalog.description)
+  })
+  const visibleMine = myExtensions.filter(item => matchesSearch(item.name, item.description))
+  const visibleUpdates = updates.filter(item => {
+    const local = installed.find(installedItem => installedItem.extensionId === item.extension_id)
+    const catalog = local === undefined
+      ? { name: item.extension_id, description: '' }
+      : installedExtensionCatalogItem(local)
+    return matchesSearch(catalog.name, catalog.description)
+  })
   const iconRefFor = (extensionId: string): string | undefined => discoverItems.find(item => item.extension_id === extensionId)?.icon_ref
     ?? publishedItems.find(item => item.extension_id === extensionId)?.icon_ref
     ?? myExtensions.find(item => item.published?.extensionId === extensionId)?.published?.iconRef
@@ -1012,6 +1031,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
           : undefined
 
   useEffect(() => {
+    if (embedded) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (shareDialogExtensionId !== undefined) { setShareDialogExtensionId(undefined); setShareNotice('') }
@@ -1022,10 +1042,19 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
     }
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('keydown', onKeyDown) }
-  }, [editBusy, editItem, onClose, publishBusy, publishItem, restartPrompt, restarting, shareDialogExtensionId])
+  }, [editBusy, editItem, embedded, onClose, publishBusy, publishItem, restartPrompt, restarting, shareDialogExtensionId])
 
-  const dialog = <div style={styles.backdrop} onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-  <section style={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="arkme-extension-center-title">
+  const dialog = <div
+    className={embedded ? 'arkme-extension-center-embedded' : undefined}
+    style={embedded ? styles.embeddedBackdrop : styles.backdrop}
+    onMouseDown={event => { if (!embedded && event.target === event.currentTarget) onClose() }}
+  >
+  <section
+    style={embedded ? styles.embeddedDialog : styles.dialog}
+    role={embedded ? 'region' : 'dialog'}
+    aria-modal={embedded ? undefined : true}
+    aria-labelledby="arkme-extension-center-title"
+  >
   <div style={styles.shell} aria-label="Arkme 扩展市场">
     <header style={styles.header}>
       <h2 id="arkme-extension-center-title" style={styles.title}>扩展市场</h2>
@@ -1035,13 +1064,25 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
         aria-haspopup="dialog"
         onClick={() => { setShareNotice(''); setShareDialogExtensionId(detail.extension_id) }}
       >分享</button>}
-      <button
+      {!embedded && <button
         type="button" style={styles.iconButton} aria-label="关闭扩展市场" title="关闭"
         onClick={onClose}
         onMouseEnter={event => { event.currentTarget.style.background = colors.hover }}
         onMouseLeave={event => { event.currentTarget.style.background = 'transparent' }}
-      ><CloseIcon /></button>
+      ><X size={15} /></button>}
     </header>
+    {embedded && <div className="arkme-extension-toolbar">
+      <label>
+        <MagnifyingGlass size={18} />
+        <input
+          value={searchQuery}
+          onChange={event => { setSearchQuery(event.target.value) }}
+          placeholder="搜索插件"
+          aria-label="搜索插件"
+        />
+      </label>
+      <button type="button" onClick={() => { switchTab('mine') }}>我的插件</button>
+    </div>}
     <nav style={styles.tabs} role="tablist" aria-label="扩展市场分类">
       {(Object.keys(TAB_LABELS) as Tab[]).map(value => <button
         key={value} type="button" role="tab" aria-selected={tab === value}
@@ -1073,7 +1114,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
         <button type="button" style={styles.detailBack} onClick={() => {
           setDetail(undefined); setInstallTask(undefined); setInstallError(''); setUninstallConfirmExtensionId(undefined)
           setShareDialogExtensionId(undefined); setShareNotice('')
-        }}><BackIcon size={14} />返回列表</button>
+        }}><ArrowLeft size={14} />返回列表</button>
         <div style={styles.detailHero}>
           <ArkmeExtensionAvatar extensionId={detail.extension_id} iconRef={detail.icon_ref} size={46} fallbackColor={colors.accent} />
           <div style={styles.cardBody}>
@@ -1162,7 +1203,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
         {visibleItems.length === 0 && <EmptyState tab={tab} />}
       </>}
       {!busy && error === '' && detail === undefined && tab === 'mine' && <>
-        {myExtensions.map(item => {
+        {visibleMine.map(item => {
           const extensionId = item.published?.extensionId
           const local = extensionId === undefined ? undefined : installed.find(candidate => candidate.extensionId === extensionId)
           return <MyExtensionCard
@@ -1196,10 +1237,10 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
 			}}
           />
         })}
-        {myExtensions.length === 0 && <EmptyState tab="mine" />}
+        {visibleMine.length === 0 && <EmptyState tab="mine" />}
       </>}
       {!busy && error === '' && tab === 'installed' && <>
-        {installed.map(item => <ExtensionCard
+        {visibleInstalled.map(item => <ExtensionCard
           key={item.extensionId}
           item={installedExtensionCatalogItem(item, iconRefFor(item.extensionId))}
           installed={item}
@@ -1207,10 +1248,10 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
           onClick={() => { void inspect(item.extensionId) }}
           onToggle={enabled => { void toggleEnabled(item.extensionId, enabled) }}
         />)}
-        {installed.length === 0 && <EmptyState tab="installed" />}
+        {visibleInstalled.length === 0 && <EmptyState tab="installed" />}
       </>}
       {!busy && error === '' && tab === 'updates' && <>
-        {updates.map(item => {
+        {visibleUpdates.map(item => {
           const local = installed.find(installedItem => installedItem.extensionId === item.extension_id)
           const catalogItem = local === undefined
             ? { extension_id: item.extension_id, name: item.extension_id, description: '', visibility: 'private' as const }
@@ -1237,7 +1278,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
             onResume={() => { void controlInstall('extensions.install.resume') }}
           />
         })}
-        {updates.length === 0 && <EmptyState tab="updates" />}
+        {visibleUpdates.length === 0 && <EmptyState tab="updates" />}
       </>}
     </main>
     {restartPrompt !== undefined && <ArkmeExtensionRestartDialog
@@ -1271,7 +1312,7 @@ export function ArkmeExtensionCenter({ currentSessionId, currentUserId, onClose 
   </section>
   </div>
 
-  if (typeof document === 'undefined') return dialog
+  if (embedded || typeof document === 'undefined') return dialog
   return createPortal(dialog, document.body)
 }
 

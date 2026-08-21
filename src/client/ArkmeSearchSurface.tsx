@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { ArrowLeft } from '@phosphor-icons/react/ArrowLeft'
+import { ArrowRight } from '@phosphor-icons/react/ArrowRight'
+import { MagnifyingGlass } from '@phosphor-icons/react/MagnifyingGlass'
+import { XCircle } from '@phosphor-icons/react/XCircle'
 import type {
   ArkmeAiVideoListItem, ArkmeAiVideoListResult, ArkmeFileAssetDisplayItem,
   ArkmeRecordSearchResult, ArkmeSearchHistoryResult, ArkmeSearchRecordItem,
@@ -132,19 +136,19 @@ export function ArkmeSearchSurface() {
   const hasQuery = query.trim() !== ''
   const recordItems = records?.items ?? []
 
-  return <div style={styles.shell}>
+  return <div className="arkme-search-surface" style={styles.shell}>
     {quick === undefined ? <div style={styles.column}>
-      <div style={styles.searchBox}>
-        <img src={`${assetRoot}/image_search_grey.svg`} alt="" style={styles.searchIcon} />
-        <input autoFocus style={styles.input} value={query} placeholder="搜索" aria-label="搜索" onChange={event => setQuery(event.target.value)} />
-        {query !== '' && <button type="button" aria-label="清空搜索" style={styles.clear} onClick={() => setQuery('')}><img src={`${assetRoot}/icon_close_round_bold.svg`} alt="" width={16} height={16} /></button>}
+      <div className="arkme-search-box" style={styles.searchBox}>
+        <MagnifyingGlass size={22} />
+        <input autoFocus style={styles.input} value={query} placeholder="搜索人物、主题或你记得的一句话…" aria-label="搜索" onChange={event => setQuery(event.target.value)} />
+        {query !== '' && <button type="button" aria-label="清空搜索" style={styles.clear} onClick={() => setQuery('')}><XCircle size={17} /></button>}
       </div>
-      {!hasQuery ? <div style={styles.scroll}>{history.length > 0 && <section style={styles.section}><h3 style={styles.sectionTitle}>搜索历史</h3><div style={styles.chips}>{history.map(value => <button key={value} type="button" style={styles.chip} onClick={() => setQuery(value)}>{value}</button>)}</div></section>}<section style={styles.section}><h3 style={styles.sectionTitle}>快速查找</h3><div style={styles.chips}>{quickEntries.map(entry => <button key={entry.key} type="button" style={styles.chip} onClick={() => { void loadQuick(entry.key) }}>{entry.label}</button>)}</div></section></div> : <>
+      {!hasQuery ? <div style={styles.scroll}>{history.length > 0 && <section className="arkme-search-history" style={styles.section}><h3 style={styles.sectionTitle}>搜索历史</h3><div style={styles.chips}>{history.map(value => <button key={value} type="button" style={styles.chip} onClick={() => setQuery(value)}><span>{value}</span><ArrowRight size={16} /></button>)}</div></section>}<section className="arkme-search-quick" style={styles.section}><h3 style={styles.sectionTitle}>快速查找</h3><div style={styles.chips}>{quickEntries.map(entry => <button key={entry.key} type="button" style={styles.chip} onClick={() => { void loadQuick(entry.key) }}><span>{entry.label}</span><ArrowRight size={16} /></button>)}</div></section></div> : <>
         {recordError !== '' && <div style={styles.error}>{recordError}</div>}
         <div style={styles.scroll}>{loading ? <Status loading /> : recordItems.length === 0 && recordError === '' ? <Status loading={false} empty /> : <div style={styles.list}>{recordItems.map(item => <RecordRow key={item.recordUid} item={item} onClick={() => setSelectedRecord(item)} />)}</div>}</div>
       </>}
     </div> : <div style={styles.quickShell}>
-      <header style={styles.quickHeader}><div style={styles.quickTopRow}><button type="button" aria-label="返回搜索" title="返回搜索" style={styles.back} onClick={leaveQuick}><img src={`${assetRoot}/arrow_left.svg`} alt="" width={20} height={20} /></button><div style={styles.quickSearch}><img src={`${assetRoot}/image_search_grey.svg`} alt="" style={styles.quickSearchIcon} /><input autoFocus style={styles.quickInput} value={query} placeholder="搜索快记" aria-label="搜索快记" onChange={event => setQuery(event.target.value)} />{query !== '' && <button type="button" aria-label="清空搜索" style={styles.clear} onClick={() => setQuery('')}><img src={`${assetRoot}/icon_close_round_bold.svg`} alt="" width={16} height={16} /></button>}</div></div><div style={styles.tabs}><button type="button" style={{ ...styles.tab, ...styles.tabActive }}>{hasQuery ? '搜索快记' : 'AI 视频'}<span style={styles.indicator} /></button></div></header>
+      <header style={styles.quickHeader}><div style={styles.quickTopRow}><button type="button" aria-label="返回搜索" title="返回搜索" style={styles.back} onClick={leaveQuick}><ArrowLeft size={20} /></button><div className="arkme-search-box" style={styles.quickSearch}><MagnifyingGlass size={22} /><input autoFocus style={styles.quickInput} value={query} placeholder="搜索快记" aria-label="搜索快记" onChange={event => setQuery(event.target.value)} />{query !== '' && <button type="button" aria-label="清空搜索" style={styles.clear} onClick={() => setQuery('')}><XCircle size={17} /></button>}</div></div><div style={styles.tabs}><button type="button" style={{ ...styles.tab, ...styles.tabActive }}>{hasQuery ? '搜索快记' : 'AI 视频'}<span style={styles.indicator} /></button></div></header>
       <main style={styles.quickBody}>{hasQuery ? <>{loading ? <Status loading /> : recordError !== '' ? <Status loading={false} error={recordError} /> : recordItems.length === 0 ? <Status loading={false} empty /> : <div style={styles.list}>{recordItems.map(item => <RecordRow key={item.recordUid} item={item} onClick={() => setSelectedRecord(item)} />)}</div>}</> : quickBody}</main>
     </div>}
 

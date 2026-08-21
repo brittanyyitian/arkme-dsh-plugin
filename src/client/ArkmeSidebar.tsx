@@ -3,6 +3,13 @@ import {
   type CSSProperties,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { ArrowUp } from '@phosphor-icons/react/ArrowUp'
+import { DotsThree } from '@phosphor-icons/react/DotsThree'
+import { Eye } from '@phosphor-icons/react/Eye'
+import { NotePencil } from '@phosphor-icons/react/NotePencil'
+import { Paperclip } from '@phosphor-icons/react/Paperclip'
+import { Plus } from '@phosphor-icons/react/Plus'
+import { Waveform } from '@phosphor-icons/react/Waveform'
 import qrcode from 'qrcode-generator'
 import type {
   ArkmeAuthSnapshot, ArkmeGroupAiPolishNotice, ArkmeGroupAiPolishSnapshot, ArkmeSourceReadResult,
@@ -13,7 +20,7 @@ import type {
 } from '../types.js'
 import { callArkme, ArkmeClientError } from './api.js'
 import { verifyPhoneCaptcha } from './geetest.js'
-import { loadArkmeImageDataUrl } from './ArkmeAvatar.js'
+import { ArkmeSourceAvatar, loadArkmeImageDataUrl } from './ArkmeAvatar.js'
 import { ArkmeMark } from './ArkmeFooterAction.js'
 import { ArkmeGroupChatControls } from './ArkmeGroupChatControls.js'
 import { ArkmeLogin, type ArkmeLoginMode } from './ArkmeLogin.js'
@@ -1327,10 +1334,17 @@ export function ArkmeSurface({ floating = false, initialAuth }: ArkmeSurfaceProp
   const arkoContentVisible = authView === 'content' && ui.mode === 'arko'
 
   return (
-    <div style={{ ...styles.surface, ...(floating ? styles.floatingSurface : {}) }}>
-      <section ref={panelRef} style={styles.panel} role="region" aria-label={surfaceTitle}>
-        {!arkoContentVisible && <header style={styles.header}>
+    <div className="arkme-conversation-surface" style={{ ...styles.surface, ...(floating ? styles.floatingSurface : {}) }}>
+      <section className="arkme-conversation-panel" ref={panelRef} style={styles.panel} role="region" aria-label={surfaceTitle}>
+        {!arkoContentVisible && <header className="arkme-conversation-header" style={styles.header}>
           <div style={styles.titleGroup}>
+            {authenticated && ui.mode === 'source' && source !== undefined && !isArkmeSelfWorkspaceSource(source)
+              && <ArkmeSourceAvatar
+                size={38}
+                {...(source.avatarRef === undefined ? {} : { avatarRef: source.avatarRef })}
+                {...(source.avatarRefs === undefined ? {} : { avatarRefs: source.avatarRefs })}
+                {...(source.groupAvatar === undefined ? {} : { groupAvatar: source.groupAvatar })}
+              />}
             {authenticated && ui.mode === 'source' && isArkmeSelfWorkspaceSource(selectedSource)
               ? <ArkmeSourceBreadcrumb
                 trail={selfBreadcrumbTrail}
@@ -1369,10 +1383,10 @@ export function ArkmeSurface({ floating = false, initialAuth }: ArkmeSurfaceProp
           />}
           {shouldShowRelatedRecordingsEntry(authenticated, source?.kind, relatedEligibility, relatedPanelOpen) && <div ref={relatedMenuRef} style={styles.headerActions}>
             <button type="button" style={styles.moreButton} aria-label="更多私聊操作" aria-haspopup="menu" aria-expanded={relatedMenuOpen}
-              onClick={() => { setRelatedMenuOpen(value => !value) }}>•••</button>
+              onClick={() => { setRelatedMenuOpen(value => !value) }}><DotsThree size={21} weight="bold" /></button>
             {relatedMenuOpen && <div style={styles.popover} role="menu">
               <button type="button" role="menuitem" style={styles.menuItem} onClick={openRelatedPanel}>
-                <span aria-hidden>◉</span><span>相关录音</span>
+                <Waveform size={16} /><span>相关录音</span>
               </button>
             </div>}
           </div>}
@@ -1412,11 +1426,11 @@ export function ArkmeSurface({ floating = false, initialAuth }: ArkmeSurfaceProp
               </div>
               : <div role="status" style={styles.loading}>正在加载发给自己的内容…</div>}
           </div> : <>
-          <div ref={bodyRef} style={styles.body}>
+          <div className="arkme-conversation-body" ref={bodyRef} style={styles.body}>
             {error !== '' && <div style={styles.error}>{error}</div>}
             <div ref={sentinelRef} style={styles.sentinel} />
             {loadingOlder && <div style={styles.loading}>正在加载更早内容…</div>}
-            {displayRows.length > 0 && <ul style={styles.records}>
+            {displayRows.length > 0 && <ul className="arkme-conversation-records" style={styles.records}>
               {displayRows.map((row, index) => {
                 const previous = index === 0 ? undefined : displayRows[index - 1]
                 const startsDay = previous === undefined
@@ -1500,11 +1514,11 @@ export function ArkmeSurface({ floating = false, initialAuth }: ArkmeSurfaceProp
               })}
             </ul>}
           </div>
-          <footer style={styles.composer}><div style={styles.composerInner}>
+          <footer className="arkme-conversation-composer" style={styles.composer}><div className="arkme-conversation-composer-inner" style={styles.composerInner}>
             {addMenuOpen && <div ref={addMenuRef} style={styles.addMenu} role="menu">
-              <button type="button" role="menuitem" style={styles.addMenuItem} onClick={() => { setAddMenuOpen(false); fileInputRef.current?.click() }}><span aria-hidden>📎</span>添加照片和文件</button>
+              <button type="button" role="menuitem" style={styles.addMenuItem} onClick={() => { setAddMenuOpen(false); fileInputRef.current?.click() }}><Paperclip size={18} />添加照片和文件</button>
               <div style={styles.menuDivider} />
-              <button type="button" role="menuitem" style={styles.addMenuItem} onClick={() => { setLongArticleCreating(true); setAddMenuOpen(false) }}><span aria-hidden>✎</span>写长文</button>
+              <button type="button" role="menuitem" style={styles.addMenuItem} onClick={() => { setLongArticleCreating(true); setAddMenuOpen(false) }}><NotePencil size={18} />写长文</button>
             </div>}
             <input ref={fileInputRef} type="file" multiple hidden accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip" onChange={event => { void selectFiles(event.currentTarget.files) }} />
             {attachments.length > 0 && <div style={styles.attachments}>{attachments.map(attachment => <ArkmeAttachmentDraftTile
@@ -1526,7 +1540,7 @@ export function ArkmeSurface({ floating = false, initialAuth }: ArkmeSurfaceProp
                 void selectFiles(imageFiles)
               }}
               onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!busy && draft.trim() !== '') void send() } }} />
-            <div style={styles.tools}><button ref={addMenuTriggerRef} type="button" style={styles.plus} aria-label="添加内容" aria-haspopup="menu" aria-expanded={addMenuOpen} onClick={() => { setAddMenuOpen(value => !value) }}>+</button><button
+            <div style={styles.tools}><button ref={addMenuTriggerRef} type="button" style={styles.plus} aria-label="添加内容" aria-haspopup="menu" aria-expanded={addMenuOpen} onClick={() => { setAddMenuOpen(value => !value) }}><Plus size={21} /></button><button
               type="button"
               style={{ ...styles.send, opacity: busy || (draft.trim() === '' && attachments.length === 0) ? .4 : 1 }}
               disabled={busy || (draft.trim() === '' && attachments.length === 0)}
@@ -1542,9 +1556,7 @@ export function ArkmeSurface({ floating = false, initialAuth }: ArkmeSurfaceProp
               }}
               onClick={() => { void send() }}
             >
-              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-                <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
-              </svg>
+              <ArrowUp size={17} weight="bold" />
             </button></div>
           </div></footer>
         </>}
@@ -1572,7 +1584,7 @@ export function ArkmeSurface({ floating = false, initialAuth }: ArkmeSurfaceProp
               && detailItem.aiPolish.originalText !== undefined
               && detailItem.aiPolish.polishedText !== undefined
               && <button type="button" style={styles.toggle} onClick={() => { setShowOriginal(value => !value) }}>
-                {showOriginal ? '👁️显示润色' : '👁️显示原文'}
+                <Eye size={15} /> {showOriginal ? '显示润色' : '显示原文'}
               </button>}
             <p style={styles.detailText}>{showOriginal && detailItem.aiPolish?.originalText !== undefined
               ? detailItem.aiPolish.originalText

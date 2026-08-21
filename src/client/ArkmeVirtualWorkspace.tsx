@@ -37,6 +37,7 @@ import {
 
 export interface ArkmeNavigationProps {
   wide?: boolean
+  variant?: 'sidebar' | 'redesign-chats'
   currentSessionId?: string | undefined
   onClose?: () => void
   onActivateSurface?: () => void
@@ -577,7 +578,7 @@ export function ArkmeSourceSortControl({
   </div>
 }
 
-export function ArkmeNavigation({ wide = true, currentSessionId, onClose, onActivateSurface, renderSlot }: ArkmeNavigationProps) {
+export function ArkmeNavigation({ wide = true, variant = 'sidebar', currentSessionId, onClose, onActivateSurface, renderSlot }: ArkmeNavigationProps) {
   const ui = useSyncExternalStore(arkmeUi.subscribe, arkmeUi.getSnapshot)
   const authState = useSyncExternalStore(arkmeAuthStore.subscribe, arkmeAuthStore.getSnapshot)
   const chatDirectory = useSyncExternalStore(arkmeChatDirectory.subscribe, arkmeChatDirectory.getSnapshot)
@@ -1019,7 +1020,7 @@ export function ArkmeNavigation({ wide = true, currentSessionId, onClose, onActi
           {...(arkoLatestPreview === undefined ? {} : { latestPreview: arkoLatestPreview })}
           onClick={showArko}
         />
-        {authenticated && <button
+        {authenticated && variant !== 'redesign-chats' && <button
           type="button" role="treeitem" aria-selected={false} style={styles.chatRow}
           onClick={() => { activateNativeEntry(); setExtensionCenterOpen(true) }}
         >
@@ -1049,8 +1050,8 @@ export function ArkmeNavigation({ wide = true, currentSessionId, onClose, onActi
             <span style={styles.chatBottom}><span style={styles.preview}>全部个人消息</span></span>
           </span>
         </button>
-        <ArkmeRecordingsRow selected={activeDirectoryEntryId === undefined && ui.mode === 'recordings'} onClick={showRecordings} />
-        <ArkmeSearchRow selected={activeDirectoryEntryId === undefined && ui.mode === 'search'} onClick={showSearch} />
+        {variant !== 'redesign-chats' && <ArkmeRecordingsRow selected={activeDirectoryEntryId === undefined && ui.mode === 'recordings'} onClick={showRecordings} />}
+        {variant !== 'redesign-chats' && <ArkmeSearchRow selected={activeDirectoryEntryId === undefined && ui.mode === 'search'} onClick={showSearch} />}
         {renderSlot !== undefined && renderSlot('arkme.directory.entry', {
           wide: !!wide,
           authenticated,

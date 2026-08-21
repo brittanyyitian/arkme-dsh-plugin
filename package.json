@@ -47,6 +47,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-theme",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-sidebar"
       ],
@@ -74,6 +75,7 @@
     "prepare": "pnpm run build"
   },
   "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
     "ali-oss": "6.23.0",
     "qrcode-generator": "2.0.4",
     "semver": "7.8.5",
@@ -88,6 +90,7 @@
     "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-client-ui-theme": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.5",
@@ -118,6 +121,7 @@
     "@deepseek-ai/dsh-tools": "0.1.0-rc.7",
     "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.7",
     "@deepseek-ai/schemastery": "3.18.1",
+    "@tsdown/css": "0.22.14",
     "@types/ali-oss": "6.16.11",
     "@types/node": "22.20.0",
     "@types/react": "~18.3.1",
