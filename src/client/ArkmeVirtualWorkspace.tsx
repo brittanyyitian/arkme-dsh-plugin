@@ -53,7 +53,7 @@ export interface ArkmeNavigationProps {
 export const ARKME_TOPIC_HIERARCHY_MAX_LEVEL = 5
 
 const colors = {
-  panel: arkmeTheme.sidebar,
+  panel: '#fff',
   text: arkmeTheme.text,
   secondary: arkmeTheme.secondary,
   caption: arkmeTheme.caption,
@@ -800,11 +800,10 @@ export function ArkmeNavigation({
       const uiSnapshot = arkmeUi.getSnapshot()
       const selected = uiSnapshot.mode === 'source' ? uiSnapshot.selectedSource : undefined
       const cachedSelected = cacheRef.current === undefined ? undefined : cachedSelectedSource(cacheRef.current)
-      const restored = uiSnapshot.mode === 'recordings' || uiSnapshot.mode === 'arko'
-        || uiSnapshot.mode === 'calendar' || uiSnapshot.mode === 'search' || uiSnapshot.mode === 'extensions'
-        ? undefined
-        : reconcileSelectedSource(selected ?? cachedSelected, loaded)
-        ?? (next === 'send_to_self' ? loaded.find(source => source.kind === 'send_to_self') : undefined)
+      const restored = uiSnapshot.mode === 'source'
+        ? reconcileSelectedSource(selected ?? cachedSelected, loaded)
+          ?? (next === 'send_to_self' ? loaded.find(source => source.kind === 'send_to_self') : undefined)
+        : undefined
       if (restored !== undefined) arkmeUi.selectSource(restored)
       persistCache({
         directory: next,
@@ -819,9 +818,6 @@ export function ArkmeNavigation({
   }, [persistCache])
 
   useEffect(() => { reconcileAuth(auth) }, [auth, reconcileAuth])
-  useEffect(() => {
-    if (!ui.open) activateNativeEntry()
-  }, [activateNativeEntry, ui.open])
   useEffect(() => {
     activateNativeEntry()
   }, [activateNativeEntry, auth?.userId, currentSessionId, directory, ui.mode, ui.selectedSource?.sourceRef])
@@ -858,7 +854,7 @@ export function ArkmeNavigation({
   }, [authenticated, auth?.userId])
   useEffect(() => {
     const userId = authenticated ? auth?.userId : undefined
-    if (userId === undefined || !ui.open) return
+    if (userId === undefined) return
     const request = arkmeArkoConversationPreviewStore.beginHistoryRequest(userId)
     if (request === undefined) return
     const controller = new AbortController()
@@ -866,17 +862,16 @@ export function ArkmeNavigation({
       .then(page => { arkmeArkoConversationPreviewStore.setLatestFromHistory(request, page.items) })
       .catch(() => undefined)
     return () => { controller.abort() }
-  }, [authenticated, auth?.userId, ui.open])
+  }, [authenticated, auth?.userId])
   useEffect(() => {
     if (!authenticated || directory !== 'root' || chatDirectory.revision === 0) return
     const loaded = chatDirectory.sources
     setSources(loaded)
     const selected = ui.mode === 'source' ? arkmeUi.getSnapshot().selectedSource : undefined
     const cachedSelected = cacheRef.current === undefined ? undefined : cachedSelectedSource(cacheRef.current)
-    const restored = ui.mode === 'recordings' || ui.mode === 'arko'
-      || ui.mode === 'calendar' || ui.mode === 'search' || ui.mode === 'extensions'
-      ? undefined
-      : reconcileSelectedSource(selected ?? cachedSelected, loaded)
+    const restored = ui.mode === 'source'
+      ? reconcileSelectedSource(selected ?? cachedSelected, loaded)
+      : undefined
     if (restored !== undefined) arkmeUi.selectSource(restored)
     persistCache({
       directory: 'root',
@@ -1148,7 +1143,7 @@ export function ArkmeNavigation({
             <span style={styles.chatBottom}><span style={styles.preview}>全部个人消息</span></span>
           </span>
         </button>}
-        {!embeddedProductShell && <ArkmeCalendarRow selected={activeDirectoryEntryId === undefined && ui.mode === 'calendar'} onClick={showCalendar} />}
+        {!embeddedProductShell && <ArkmeCalendarRow selected={activeDirectoryEntryId === undefined && ui.calendarOpen === true} onClick={showCalendar} />}
         {!embeddedProductShell && <ArkmeRecordingsRow selected={activeDirectoryEntryId === undefined && ui.mode === 'recordings'} onClick={showRecordings} />}
         {!embeddedProductShell && <ArkmeSearchRow selected={activeDirectoryEntryId === undefined && ui.mode === 'search'} onClick={showSearch} />}
         {renderSlot !== undefined && renderSlot('arkme.directory.entry', {

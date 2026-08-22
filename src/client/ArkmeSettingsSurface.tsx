@@ -4,9 +4,7 @@ import type { ArkmeAuthSnapshot, ArkmeUserProfile, ArkmeUserProfileSnapshot } fr
 import { callArkme } from './api.js'
 import { ArkmeUserAvatar } from './ArkmeAvatar.js'
 import { arkmeAuthStore } from './auth-store.js'
-import { arkmeDesktopNotifications } from './desktop-notification-runtime.js'
 import { clearLastNavigationCache } from './navigation-cache.js'
-import { arkmePluginUpdateStore } from './plugin-update-store.js'
 import { arkmeUi } from './ui-controller.js'
 
 interface SettingsRowProps {
@@ -42,17 +40,11 @@ function SettingsGroup({ title, children, id }: { title: string; children: React
   </section>
 }
 
-export interface ArkmeSettingsSurfaceProps {
-  onOpenModels(): void
-}
-
-export function ArkmeSettingsSurface({ onOpenModels }: ArkmeSettingsSurfaceProps) {
+export function ArkmeSettingsSurface() {
   const authState = useSyncExternalStore(arkmeAuthStore.subscribe, arkmeAuthStore.getSnapshot)
-  const updateState = useSyncExternalStore(arkmePluginUpdateStore.subscribe, arkmePluginUpdateStore.getSnapshot)
   const [profile, setProfile] = useState<ArkmeUserProfile>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [notificationPermission, setNotificationPermission] = useState(() => arkmeDesktopNotifications.permission())
 
   useEffect(() => {
     if (authState.auth?.status !== 'authenticated') {
@@ -87,23 +79,10 @@ export function ArkmeSettingsSurface({ onOpenModels }: ArkmeSettingsSurfaceProps
     }
   }
 
-  const enableNotifications = async () => {
-    setBusy(true)
-    try {
-      setNotificationPermission(await arkmeDesktopNotifications.requestPermission())
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const displayName = profile?.displayName.trim() || profile?.nickname.trim() || '我的账户'
   const contact = profile?.contact.phoneMasked ?? profile?.contact.emailMasked ?? '已通过 Arkme 登录'
-  const notificationLabel = notificationPermission === 'granted'
-    ? '已开启'
-    : notificationPermission === 'denied' ? '已阻止' : notificationPermission === 'default' ? '未开启' : '不可用'
-  const version = updateState.status?.installedVersion ?? '…'
 
-  return <div className="arkme-redesign-settings-surface" aria-label="Arkme 设置">
+  return <div className="arkme-redesign-settings-surface" aria-label="我的账户">
     <div className="arkme-redesign-settings-shell">
       <div className="arkme-redesign-settings-profile">
         <ArkmeUserAvatar {...(profile?.avatarRef ? { avatarRef: profile.avatarRef } : {})} size={56} label="当前用户头像" />
@@ -117,28 +96,6 @@ export function ArkmeSettingsSurface({ onOpenModels }: ArkmeSettingsSurfaceProps
         <SettingsRow title="个人资料" description={profile === undefined ? '正在读取账户资料' : '头像、昵称与即我号'} />
         <SettingsRow title="登录与安全" description={contact} />
         <SettingsRow danger title={busy ? '正在退出…' : '退出登录'} description="退出当前 Arkme 账户" disabled={busy} onClick={() => { void logout() }} />
-      </SettingsGroup>
-
-      <SettingsGroup title="通用" id="arkme-settings-general">
-        <SettingsRow title="模型与 API Key" description="配置模型与访问凭据" onClick={onOpenModels} />
-        <SettingsRow title="外观" description="跟随系统" />
-        <SettingsRow
-          title="通知"
-          description={notificationLabel}
-          disabled={busy}
-          {...(notificationPermission === 'default' ? { onClick: () => { void enableNotifications() } } : {})}
-        />
-      </SettingsGroup>
-
-      <SettingsGroup title="Arkme">
-        <SettingsRow title="执行前确认" description="发送、发布和安装时确认" />
-        <SettingsRow title="可读取内容" description="对话、任务与录音" />
-      </SettingsGroup>
-
-      <SettingsGroup title="关于" id="arkme-settings-about">
-        <SettingsRow title="关于 Arkme" description={`版本 ${version}`} />
-        <SettingsRow title="用户协议" description="查看 Arkme 用户协议" href="https://www.arkme.ai/article/user-aggrement-v1.html" />
-        <SettingsRow title="隐私条款" description="查看 Arkme 隐私条款" href="https://www.arkme.ai/article/privacy-aggrement-v1.html" />
       </SettingsGroup>
 
       {error !== '' && <div className="arkme-redesign-settings-error" role="alert">{error}</div>}

@@ -1,6 +1,6 @@
 import {
   Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
-  type CSSProperties,
+  type CSSProperties, type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
 import qrcode from 'qrcode-generator'
@@ -21,7 +21,6 @@ import { ArkmeMuteIcon } from './ArkmeMuteIcon.js'
 import { ArkmeArkoSurface } from './ArkmeArkoSurface.js'
 import { ArkmePrivateCallMenu } from './ArkmePrivateCallMenu.js'
 import { ArkmeLongArticleDialog } from './ArkmeLongArticleDialog.js'
-import { ArkmeCalendarSurface } from './ArkmeCalendarSurface.js'
 import { ArkmeRecordingSurface } from './ArkmeRecordingSurface.js'
 import { ArkmeAttachmentDraftTile, ArkmeMessageContent } from './ArkmeRichContent.js'
 import { ArkmeSearchSurface } from './ArkmeSearchSurface.js'
@@ -59,10 +58,14 @@ import { isArkmeSelfWorkspaceSource } from './source-list.js'
 
 export interface ArkmeSurfaceProps {
   floating?: boolean
+  productNavigation?: boolean
   initialAuth?: ArkmeAuthSnapshot | undefined
   currentSessionId?: string | undefined
   renderSlot?: ArkmeNavigationProps['renderSlot']
   productChrome?: boolean
+  directoryLead?: ReactNode
+  onCreateTask?: () => void
+  onActivateSurface?: () => void
 }
 
 export type ArkmeAuthView = 'login' | 'content'
@@ -465,7 +468,17 @@ function ForwardRecordsDetail({ item, onClose }: { item: ArkmeTimelineItem; onCl
   </aside>
 }
 
-export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, renderSlot, productChrome = true }: ArkmeSurfaceProps = {}) {
+export function ArkmeSurface({
+  floating = false,
+  initialAuth,
+  currentSessionId,
+  renderSlot,
+  productChrome = true,
+  productNavigation = productChrome,
+  directoryLead,
+  onCreateTask,
+  onActivateSurface,
+}: ArkmeSurfaceProps = {}) {
   const ui = useSyncExternalStore(arkmeUi.subscribe, arkmeUi.getSnapshot, arkmeUi.getSnapshot)
   const authStoreSnapshot = useSyncExternalStore(
     arkmeAuthStore.subscribe,
@@ -489,7 +502,7 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
   )
   const auth = authStoreSnapshot.auth ?? initialAuth
   const authenticatedUserId = auth?.status === 'authenticated' ? auth.userId : undefined
-  const conversationBackdropVisible = ui.mode === 'source' || ui.mode === 'calendar'
+  const conversationBackdropVisible = ui.mode === 'source'
   const selectedSource = conversationBackdropVisible ? ui.selectedSource : undefined
   const [selfSourcesResolution, setSelfSourcesResolution] = useState<ArkmeAccountSelfSourcesResolution>()
   const [selfSourcesRetryRevision, setSelfSourcesRetryRevision] = useState(0)
@@ -656,7 +669,9 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
       return
     }
     bindingNotifiedUserIdRef.current = undefined
-    if (accountChanged) arkmeUi.authChanged(true, true)
+    if (accountChanged || arkmeUi.getSnapshot().mode === 'login') {
+      arkmeUi.authChanged(true, accountChanged)
+    }
   }, [])
 
   useEffect(() => {
@@ -993,7 +1008,7 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
   }, [acknowledgeRead, authenticated, chatDelta, source?.sourceRef])
 
   useEffect(() => {
-    if (!authenticated || !ui.surfaceOpen || source?.kind !== 'group_chat') return
+    if (!authenticated || source?.kind !== 'group_chat') return
     let cancelled = false
     const refreshPresentation = () => {
       void callArkme<ArkmeGroupAiPolishSnapshot>('source.ai-polish.settings', {
@@ -1005,7 +1020,7 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
     }
     const timer = setInterval(refreshPresentation, 3_000)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [authenticated, source?.sourceRef, ui.surfaceOpen])
+  }, [authenticated, source?.sourceRef])
 
   useEffect(() => {
     const root = bodyRef.current; const sentinel = sentinelRef.current
@@ -1373,7 +1388,7 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
         ...(productChrome && compactNavigation ? styles.compactSurface : {}),
       }}
     >
-      {productChrome && authView === 'content' && <ArkmeProductNavigation
+      {productChrome && productNavigation && authView === 'content' && <ArkmeProductNavigation
         compact={compactNavigation}
         currentSessionId={currentSessionId}
       />}
@@ -1385,7 +1400,9 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
         <ArkmeNavigation
           currentSessionId={currentSessionId}
           embeddedProductShell
-          onActivateSurface={() => { arkmeUi.activateSurface() }}
+          {...(directoryLead === undefined ? {} : { directoryLead })}
+          {...(onCreateTask === undefined ? {} : { onCreateTask })}
+          {...(onActivateSurface === undefined ? {} : { onActivateSurface })}
           {...(renderSlot === undefined ? {} : { renderSlot })}
         />
       </aside>}
@@ -1662,7 +1679,6 @@ export function ArkmeSurface({ floating = false, initialAuth, currentSessionId, 
           </div>
         </aside>}
       </section>
-      {authView === 'content' && ui.mode === 'calendar' && <ArkmeCalendarSurface />}
       {relatedPanelOpen && source?.kind === 'private_chat' && <RelatedRecordingsPanel
         contactName={source.displayName}
         state={relatedState}
