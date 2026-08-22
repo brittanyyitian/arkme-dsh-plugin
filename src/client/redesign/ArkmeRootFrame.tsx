@@ -434,7 +434,7 @@ export function ArkmeRootFrame({
     {route === 'chats' && taskConversationOpen && layoutState.detailsOpen && <aside className="arkme-redesign-details">
       {renderSlot('details', {})}
     </aside>}
-    {calendarOpen && <div className="arkme-redesign-calendar-overlay"><ArkmeCalendarSurface onClose={() => { setCalendarOpen(false) }} /></div>}
+    {calendarOpen && <div className="arkme-redesign-calendar-overlay"><ArkmeCalendarSurface anchor="product-rail" onClose={() => { setCalendarOpen(false) }} /></div>}
     <div className="arkme-redesign-overlays" data-shell-overlay>
       {renderSlot('shell.overlay', {})}
     </div>

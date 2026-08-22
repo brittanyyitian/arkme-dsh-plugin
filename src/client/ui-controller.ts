@@ -13,16 +13,19 @@ function sameSource(left: ArkmeSourceItem | undefined, right: ArkmeSourceItem | 
 export interface ArkmeUiState {
   authRevision: number
   chatRevision: number
-  mode: 'login' | 'source' | 'recordings' | 'calendar' | 'search' | 'extensions' | 'arko'
+  mode: 'login' | 'source' | 'recordings' | 'search' | 'extensions' | 'arko'
+    | 'settings' | 'task-start' | 'task-session'
   selectedSource?: ArkmeSourceItem
   recordingTarget?: { dateStamp: number; startAtMillis: number }
   extensionShareRef?: string
+  calendarOpen?: boolean
 }
 
 export class ArkmeUiController {
   private state: ArkmeUiState = { authRevision: 0, chatRevision: 0, mode: 'login' }
   private lastConversationSource: ArkmeSourceItem | undefined
   private readonly listeners = new Set<() => void>()
+  private settingsOpener: (() => void) | undefined
 
   readonly getSnapshot = (): ArkmeUiState => this.state
 
@@ -31,16 +34,26 @@ export class ArkmeUiController {
     return () => { this.listeners.delete(listener) }
   }
 
+  bindSettingsOpener(opener: () => void): () => void {
+    this.settingsOpener = opener
+    return () => { if (this.settingsOpener === opener) this.settingsOpener = undefined }
+  }
+
+  openDshSettings(): void {
+    this.settingsOpener?.()
+  }
+
   focusSendToSelf(): void {
     this.lastConversationSource = undefined
-    const { selectedSource: _selectedSource, ...rest } = this.state
+    const { selectedSource: _selectedSource, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'source' })
   }
 
   authChanged(authenticated = false, resetSelection = false): void {
     if (authenticated) {
-      const { selectedSource: _selectedSource, ...stateWithoutSelection } = this.state
-      const state = resetSelection ? stateWithoutSelection : this.state
+      const { selectedSource: _selectedSource, calendarOpen: _calendarOpen, ...stateWithoutSelection } = this.state
+      const { calendarOpen: _activeCalendar, ...stateWithoutCalendar } = this.state
+      const state = resetSelection ? stateWithoutSelection : stateWithoutCalendar
       this.publish({
         ...state,
         mode: state.mode === 'login' ? 'source' : state.mode,
@@ -49,7 +62,7 @@ export class ArkmeUiController {
       return
     }
     this.lastConversationSource = undefined
-    const { selectedSource: _selectedSource, ...rest } = this.state
+    const { selectedSource: _selectedSource, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({
       ...rest,
       mode: 'login',
@@ -62,37 +75,46 @@ export class ArkmeUiController {
   }
 
   showLogin(): void {
-    const { selectedSource: _selectedSource, ...rest } = this.state
+    const { selectedSource: _selectedSource, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'login' })
   }
 
   showRecordings(): void {
-    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'recordings' })
   }
 
   showCalendar(): void {
-    const { recordingTarget: _recordingTarget, ...rest } = this.state
-    this.publish({ ...rest, mode: 'calendar' })
+    if (this.state.calendarOpen === true) {
+      const { calendarOpen: _calendarOpen, ...rest } = this.state
+      this.publish(rest)
+      return
+    }
+    this.publish({ ...this.state, calendarOpen: true })
+  }
+
+  hideCalendar(): void {
+    const { calendarOpen: _calendarOpen, ...rest } = this.state
+    this.publish(rest)
   }
 
   showRecordingTarget(dateStamp: number, startAtMillis: number): void {
-    const { selectedSource: _selectedSource, ...rest } = this.state
+    const { selectedSource: _selectedSource, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'recordings', recordingTarget: { dateStamp, startAtMillis } })
   }
 
   showSearch(): void {
-    const { selectedSource: _selectedSource, ...rest } = this.state
+    const { selectedSource: _selectedSource, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'search' })
   }
 
   showExtensions(): void {
-    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'extensions' })
   }
 
   showConversations(): void {
-    const { recordingTarget: _recordingTarget, ...rest } = this.state
+    const { recordingTarget: _recordingTarget, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({
       ...rest,
       mode: 'source',
@@ -101,12 +123,27 @@ export class ArkmeUiController {
   }
 
   showArko(): void {
-    const { selectedSource: _selectedSource, ...rest } = this.state
+    const { selectedSource: _selectedSource, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'arko' })
   }
 
+  showSettings(): void {
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, calendarOpen: _calendarOpen, ...rest } = this.state
+    this.publish({ ...rest, mode: 'settings' })
+  }
+
+  showNewTask(): void {
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, calendarOpen: _calendarOpen, ...rest } = this.state
+    this.publish({ ...rest, mode: 'task-start' })
+  }
+
+  showTaskSession(): void {
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, calendarOpen: _calendarOpen, ...rest } = this.state
+    this.publish({ ...rest, mode: 'task-session' })
+  }
+
   openExtensionShare(shareRef: string): void {
-    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, ...rest } = this.state
+    const { selectedSource: _selectedSource, recordingTarget: _recordingTarget, calendarOpen: _calendarOpen, ...rest } = this.state
     this.publish({ ...rest, mode: 'source', extensionShareRef: shareRef })
   }
 
@@ -117,13 +154,15 @@ export class ArkmeUiController {
 
   selectSource(source: ArkmeSourceItem): void {
     this.lastConversationSource = source
-    this.publish({ ...this.state, mode: 'source', selectedSource: source })
+    const { calendarOpen: _calendarOpen, ...rest } = this.state
+    this.publish({ ...rest, mode: 'source', selectedSource: source })
   }
 
   private publish(next: ArkmeUiState): void {
     if (next.authRevision === this.state.authRevision
       && next.chatRevision === this.state.chatRevision
       && next.mode === this.state.mode
+      && next.calendarOpen === this.state.calendarOpen
       && next.recordingTarget?.dateStamp === this.state.recordingTarget?.dateStamp
       && next.recordingTarget?.startAtMillis === this.state.recordingTarget?.startAtMillis
       && next.extensionShareRef === this.state.extensionShareRef

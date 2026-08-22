@@ -1,6 +1,6 @@
 import {
   Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
-  type CSSProperties,
+  type CSSProperties, type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
 import qrcode from 'qrcode-generator'
@@ -21,7 +21,6 @@ import { ArkmeMuteIcon } from './ArkmeMuteIcon.js'
 import { ArkmeArkoSurface } from './ArkmeArkoSurface.js'
 import { ArkmePrivateCallMenu } from './ArkmePrivateCallMenu.js'
 import { ArkmeLongArticleDialog } from './ArkmeLongArticleDialog.js'
-import { ArkmeCalendarSurface } from './ArkmeCalendarSurface.js'
 import { ArkmeRecordingSurface } from './ArkmeRecordingSurface.js'
 import { ArkmeAttachmentDraftTile, ArkmeMessageContent } from './ArkmeRichContent.js'
 import { ArkmeSearchSurface } from './ArkmeSearchSurface.js'
@@ -64,6 +63,9 @@ export interface ArkmeSurfaceProps {
   currentSessionId?: string | undefined
   renderSlot?: ArkmeNavigationProps['renderSlot']
   productChrome?: boolean
+  directoryLead?: ReactNode
+  onCreateTask?: () => void
+  onActivateSurface?: () => void
 }
 
 export type ArkmeAuthView = 'login' | 'content'
@@ -473,6 +475,9 @@ export function ArkmeSurface({
   renderSlot,
   productChrome = true,
   productNavigation = productChrome,
+  directoryLead,
+  onCreateTask,
+  onActivateSurface,
 }: ArkmeSurfaceProps = {}) {
   const ui = useSyncExternalStore(arkmeUi.subscribe, arkmeUi.getSnapshot, arkmeUi.getSnapshot)
   const authStoreSnapshot = useSyncExternalStore(
@@ -497,7 +502,7 @@ export function ArkmeSurface({
   )
   const auth = authStoreSnapshot.auth ?? initialAuth
   const authenticatedUserId = auth?.status === 'authenticated' ? auth.userId : undefined
-  const conversationBackdropVisible = ui.mode === 'source' || ui.mode === 'calendar'
+  const conversationBackdropVisible = ui.mode === 'source'
   const selectedSource = conversationBackdropVisible ? ui.selectedSource : undefined
   const [selfSourcesResolution, setSelfSourcesResolution] = useState<ArkmeAccountSelfSourcesResolution>()
   const [selfSourcesRetryRevision, setSelfSourcesRetryRevision] = useState(0)
@@ -1395,11 +1400,14 @@ export function ArkmeSurface({
         <ArkmeNavigation
           currentSessionId={currentSessionId}
           embeddedProductShell
+          {...(directoryLead === undefined ? {} : { directoryLead })}
+          {...(onCreateTask === undefined ? {} : { onCreateTask })}
+          {...(onActivateSurface === undefined ? {} : { onActivateSurface })}
           {...(renderSlot === undefined ? {} : { renderSlot })}
         />
       </aside>}
       <section className="arkme-conversation-panel" ref={panelRef} style={styles.panel} role="region" aria-label={surfaceTitle}>
-        {!arkoContentVisible && !utilityContentVisible && <header className="arkme-conversation-header" style={styles.header}>
+        {authView !== 'login' && !arkoContentVisible && !utilityContentVisible && <header className="arkme-conversation-header" style={styles.header}>
           {authenticated && conversationBackdropVisible && source?.kind === 'group_chat' && <span style={styles.headerAvatar}>
             <ArkmeSourceAvatar
               size={34}
@@ -1671,7 +1679,6 @@ export function ArkmeSurface({
           </div>
         </aside>}
       </section>
-      {authView === 'content' && ui.mode === 'calendar' && <ArkmeCalendarSurface />}
       {relatedPanelOpen && source?.kind === 'private_chat' && <RelatedRecordingsPanel
         contactName={source.displayName}
         state={relatedState}
